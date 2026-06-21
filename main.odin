@@ -1,8 +1,10 @@
 package main
 
-import "core:mem"
+import "core:fmt"
+import "vendor:sdl3/image"
 import "core:log"
 import "core:math/linalg"
+import "core:mem"
 import sdl "vendor:sdl3"
 
 vert_shader_code := #load("./shaders/spv.vert")
@@ -25,19 +27,36 @@ main :: proc() {
 	vert_shader := load_shader(gpu, vert_shader_code, .VERTEX, 1)
 	frag_shader := load_shader(gpu, frag_shader_code, .FRAGMENT, 0)
 
-    Vec2 :: [2]f32
+	Vertex :: struct {
+		pos:   [2]f32,
+		uv:    [2]f32,
+		color: [4]u8,
+	}
 
-    vertex_buffer_descriptions := sdl.GPUVertexBufferDescription {
-        slot = 0,
-        pitch = size_of(Vec2),
-        input_rate = .VERTEX,
-        instance_step_rate = 0
-    }
-    vertex_attributes := sdl.GPUVertexAttribute {
-        location = 0,
-        buffer_slot = 0,
-        format = .FLOAT2,
-        offset = 0
+	UBO :: struct {
+		proj: matrix[4, 4]f32,
+	}
+
+    vertex_attributes : []sdl.GPUVertexAttribute = 
+    {
+        {
+            location = 0,
+            buffer_slot = 0,
+            format = .FLOAT2,
+            offset = 0,
+        },
+        {
+            location = 1,
+            buffer_slot = 0,
+            format = .FLOAT2,
+            offset = u32(offset_of(Vertex, uv))
+        },
+        {
+            location = 2,
+            buffer_slot = 0,
+            format = .UBYTE4_NORM,
+            offset = u32(offset_of(Vertex, color))
+        }
     }
 
 	pipeline := sdl.CreateGPUGraphicsPipeline(
@@ -52,70 +71,97 @@ main :: proc() {
 					format = sdl.GetGPUSwapchainTextureFormat(gpu, window),
 				},
 			},
-            vertex_input_state = {
-                vertex_buffer_descriptions = &vertex_buffer_descriptions,
-                num_vertex_buffers = 1,
-                vertex_attributes = &vertex_attributes,
-                num_vertex_attributes = 1
-            },
+			vertex_input_state = {
+				vertex_buffer_descriptions = raw_data([]sdl.GPUVertexBufferDescription { 
+                    {
+                        slot = 0,
+                        pitch = size_of(Vertex),
+                        input_rate = .VERTEX,
+                        instance_step_rate = 0
+                    }
+				}),
+				num_vertex_buffers = 1,
+				num_vertex_attributes = u32(len(vertex_attributes)),
+				vertex_attributes = raw_data(vertex_attributes)
+			},
 		},
 	)
 
 	sdl.ReleaseGPUShader(gpu, vert_shader)
 	sdl.ReleaseGPUShader(gpu, frag_shader)
 
-	UBO :: struct {
-		proj: matrix[4, 4]f32,
+
+	w, h := f32(width), f32(height)
+	ubo: UBO = {
+		proj = linalg.matrix_ortho3d_f32(0, w, h, 0, 0, 1, false),
 	}
 
-    w, h := f32(width), f32(height)
-    ubo: UBO = {
-        proj = linalg.matrix_ortho3d_f32(0, w, h, 0, 0, 1, false)
-    }
-    
-    vertices : []Vec2 = {
-        { 0, 390 },
-        { 640, 0 },
-        { 1280, 390 }
+	vertices: []Vertex = {
+        { pos = { 320, 585 }, uv = { 0, 1 },  color = { 255, 0, 0, 255 }},
+        { pos = { 960, 585 }, uv = { 1, 1 },  color = { 0, 255, 0, 255 }},
+        { pos = { 960, 195 }, uv = { 1, 0 },  color = { 0, 0, 255, 255 }},
+        { pos = { 320, 195 }, uv = { 0, 0 },  color = { 255, 0, 0, 255 }},
     }
 
-    vertices_byte_size := len(vertices) * size_of(vertices[0])
+	indices: []u16 = {0, 1, 2, 0, 2, 3}
 
-    vertex_buffer := sdl.CreateGPUBuffer(gpu, {
-        props = 0,
-        size = u32(vertices_byte_size),
-        usage = {.VERTEX}
-    })
+    surface := image.Load("./assets/luffy-elbaph.icon")
+    fmt.println(surface.format)
+    converted := sdl.ConvertSurface(surface, .RGBA32)
+    defer sdl.DestroySurface(surface)
+    defer sdl.DestroySurface(converted)
 
-    transfer_buf := sdl.CreateGPUTransferBuffer(gpu,{
-        usage = .UPLOAD,
-        size = u32(vertices_byte_size),
-    })
+	vertices_byte_size := len(vertices) * size_of(Vertex)
+	indices_byte_size := len(indices) * size_of(indices[0])
 
-    transfer_mem := sdl.MapGPUTransferBuffer(gpu, transfer_buf, false)
-    mem.copy(transfer_mem, raw_data(vertices), vertices_byte_size)
-    sdl.UnmapGPUTransferBuffer(gpu, transfer_buf)
+	vertex_buffer := sdl.CreateGPUBuffer(
+		gpu,
+		{props = 0, size = u32(vertices_byte_size), usage = {.VERTEX}},
+	)
 
-    copy_cmd_buf := sdl.AcquireGPUCommandBuffer(gpu)
-    copy_pass := sdl.BeginGPUCopyPass(copy_cmd_buf)
+	index_buffer := sdl.CreateGPUBuffer(
+		gpu,
+		{props = 0, size = u32(indices_byte_size), usage = {.INDEX}},
+	)
 
-    sdl.UploadToGPUBuffer(copy_pass,
-        {transfer_buffer = transfer_buf},
-        {buffer = vertex_buffer, size = u32(vertices_byte_size)},
-        false
-    )
+	transfer_buf := sdl.CreateGPUTransferBuffer(
+		gpu,
+		{usage = .UPLOAD, size = u32(vertices_byte_size) + u32(indices_byte_size)},
+	)
 
-    sdl.EndGPUCopyPass(copy_pass)
+	transfer_mem := sdl.MapGPUTransferBuffer(gpu, transfer_buf, false)
+	mem.copy(transfer_mem, raw_data(vertices), vertices_byte_size)
+	index_dest := mem.ptr_offset((^Vertex)(transfer_mem), len(vertices))
 
-    if !sdl.SubmitGPUCommandBuffer(copy_cmd_buf) do log.panicf("Could not submit command buffer {}", sdl.GetError())
+	mem.copy(index_dest, raw_data(indices), indices_byte_size)
+	sdl.UnmapGPUTransferBuffer(gpu, transfer_buf)
 
-    sdl.ReleaseGPUTransferBuffer(gpu, transfer_buf)
-    // begin copy pass
-    // invoke upload commands
-    // end copy pass and sumbit
+	copy_cmd_buf := sdl.AcquireGPUCommandBuffer(gpu)
+	copy_pass := sdl.BeginGPUCopyPass(copy_cmd_buf)
+
+	sdl.UploadToGPUBuffer(
+		copy_pass,
+		{transfer_buffer = transfer_buf},
+		{buffer = vertex_buffer, size = u32(vertices_byte_size)},
+		false,
+	)
+
+	sdl.UploadToGPUBuffer(
+		copy_pass,
+		{transfer_buffer = transfer_buf, offset = u32(vertices_byte_size)},
+		{buffer = index_buffer, size = u32(indices_byte_size)},
+		false,
+	)
+
+	sdl.EndGPUCopyPass(copy_pass)
+
+	if !sdl.SubmitGPUCommandBuffer(copy_cmd_buf) {
+		log.panicf("Could not submit command buffer {}", sdl.GetError())
+	}
+
+	sdl.ReleaseGPUTransferBuffer(gpu, transfer_buf)
 
 	main_loop: for {
-		// process events
 		ev: sdl.Event
 		for sdl.PollEvent(&ev) {
 			#partial switch ev.type {
@@ -146,8 +192,15 @@ main :: proc() {
 		sdl.BindGPUGraphicsPipeline(render_pass, pipeline)
 
 		sdl.PushGPUVertexUniformData(cmd_buf, 0, &ubo, size_of(ubo))
-        sdl.BindGPUVertexBuffers(render_pass, 0, &(sdl.GPUBufferBinding {buffer = vertex_buffer}), 1)
-		sdl.DrawGPUPrimitives(render_pass, 3, 1, 0, 0)
+		sdl.BindGPUVertexBuffers(
+			render_pass,
+			0,
+			&(sdl.GPUBufferBinding{buffer = vertex_buffer}),
+			1,
+		)
+		sdl.BindGPUIndexBuffer(render_pass, {buffer = index_buffer}, ._16BIT)
+
+		sdl.DrawGPUIndexedPrimitives(render_pass, 6, 1, 0, 0, 0)
 		sdl.EndGPURenderPass(render_pass)
 		if !sdl.SubmitGPUCommandBuffer(cmd_buf) do log.panicf("Could not submit command buffer {}", sdl.GetError())
 	}

@@ -2,6 +2,7 @@
 
 layout(set = 1, binding = 0) uniform UBO {
     mat4 proj;
+    mat4 model;
 };
 
 layout(location = 0) in vec2 pos;
@@ -12,7 +13,7 @@ layout(location = 0) out vec2 frag_uv;
 layout(location = 1) out vec4 frag_color;
 
 void main() {
-    gl_Position = proj * vec4(pos, 0, 1);
+    gl_Position = proj * model * vec4(pos, 0, 1);
     frag_uv = uv;
     frag_color = color;
 }

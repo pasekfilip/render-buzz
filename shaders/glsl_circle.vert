@@ -1,7 +1,10 @@
 #version 460
 
-layout(set = 1, binding = 0) uniform UBO {
+layout(set = 1, binding = 0) uniform Proj {
     mat4 proj;
+};
+
+layout(set = 1, binding = 1) uniform Model {
     mat4 model;
 };
 

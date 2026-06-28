@@ -42,33 +42,42 @@ Your job is to teach, not to build.
 
 ## Knowledge snapshot (update only when Filip asks)
 
+**First game: tanks** — building a tank game as the driver for engine features. Add engine
+capabilities as the game needs them, not speculatively.
+
 **Comfortable with:**
 - Full render loop: `AcquireGPUCommandBuffer` → `WaitAndAcquireGPUSwapchainTexture` →
-  `BeginGPURenderPass` (clear) → `BindGPUGraphicsPipeline` → `DrawGPUPrimitives` →
+  `BeginGPURenderPass` (clear) → `BindGPUGraphicsPipeline` → `DrawGPUIndexedPrimitives` →
   `EndGPURenderPass` → `SubmitGPUCommandBuffer`.
 - Device creation, claiming the window, SPIR-V shader loading, graphics pipeline setup.
-- Vertex uniform buffers (`PushGPUVertexUniformData`) with an orthographic projection matrix.
+- Vertex buffers: `CreateGPUBuffer`, transfer buffer map/copy, `UploadToGPUBuffer` in a copy pass,
+  `vertex_input_state` (buffer descriptions + attributes), `BindGPUVertexBuffers`.
+- Index buffers: `CreateGPUBuffer` with `.INDEX`, `BindGPUIndexBuffer`, `DrawGPUIndexedPrimitives`.
+- Vertex + fragment uniforms: `PushGPUVertexUniformData` (proj matrix at slot 0, model at slot 1),
+  `PushGPUFragmentUniformData` (color at slot 0).
+- Orthographic projection via `linalg.matrix_ortho3d_f32`, working in pixel space.
+- `Entity` struct with `translate/scale/angle/color/parent`, parent-child transform composition
+  in `draw_entity`. Keyboard input (WASD move, A/D rotate) with delta time.
 - Event handling (quit / escape).
 
-**The current edge (what he's mid-crossing):**
-- Drawing a hardcoded 3-vertex triangle, but the vertex shader's `in vec2 pos` is fed nothing:
-  no `vertex_input_state` on the pipeline and no vertex buffer bound. **Next concept: getting real
-  vertex data onto the GPU.**
+**Known issue to revisit:** `draw_entity` in `entity.odin:23` — the `loopy` loop never advances
+`root_entity = root_entity.parent`, so it only works correctly for exactly one parent level.
+Deeper hierarchies would infinite-loop.
+
+**The current edge:**
+- Textures & samplers. Commented-out scaffolding exists in `main.odin` (GPU texture creation,
+  transfer buffer upload, sampler). `glsl_texture.frag` is written. Gap: loading image pixels
+  into CPU memory (SDL surface → convert to RGBA32 → copy into transfer buffer).
 
 **Coming from:** an OpenGL/C++ engine (had VertexBuffer, VertexArray, Shader, Texture classes) —
 concepts are familiar, the explicit SDL3 GPU API is the new part.
 
-## Roadmap toward "game engine" (rough order)
+## Roadmap toward "tank game" (rough order, feature-driven)
 
-1. **Vertex buffers** — `CreateGPUBuffer`, transfer buffers (`CreateGPUTransferBuffer`, map/copy),
-   `UploadToGPUBuffer` in a copy pass, and `vertex_input_state` (buffer descriptions + attributes) on
-   the pipeline. Bind with `BindGPUVertexBuffers`. ← *immediate next*
-2. **Index buffers** — `DrawGPUIndexedPrimitives`, share vertices.
-3. **Textures & samplers** — upload image data, `BindGPUFragmentSamplers`, sample in the frag shader.
-4. **3D** — perspective projection, a depth buffer (depth-stencil target), model/view/projection,
-   a basic camera.
-5. **Many objects** — per-object transforms, instancing, simple mesh loading.
-6. **Engine architecture** — start abstracting: Renderer / Mesh / Material / Camera as Odin structs &
-   procs. Separate "engine" from "game".
-7. **Systems** — input, fixed timestep / delta time, scene or entity structure.
-8. **Beyond** — lighting, asset pipeline, hot-reload, ECS — as appetite dictates.
+1. ✅ **Vertex buffers** — `CreateGPUBuffer`, transfer buffers, `vertex_input_state`.
+2. ✅ **Index buffers** — `DrawGPUIndexedPrimitives`, share vertices.
+3. **Textures & samplers** — load image → SDL surface → GPU texture, `BindGPUFragmentSamplers`. ← *next*
+4. **Many objects** — draw multiple tanks/entities efficiently; revisit entity architecture.
+5. **Engine architecture** — Renderer / Entity / Sprite as proper Odin structs & procs.
+6. **Systems** — fixed timestep / delta time (already has delta time), collision, game logic.
+7. **Beyond** — audio, asset pipeline, hot-reload, as appetite dictates.

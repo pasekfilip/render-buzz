@@ -48,7 +48,7 @@ setup_pipeline :: proc(shader_type: Shader_Type) -> ^sdl.GPUGraphicsPipeline {
 		vert_shader = load_shader(vert_quad, .VERTEX, num_uniform_buffers = 2, num_samplers = 0)
 		frag_shader = load_shader(frag_quad, .FRAGMENT, num_uniform_buffers = 1, num_samplers = 0)
 
-        pipeline = create_pipeline(vert_shader, frag_shader, vertex_attributes)
+        pipeline = create_pipeline(vert_shader, frag_shader, vertex_attributes, .FILL)
         break
     case .Circle:
         vert_shader = load_shader(vert_circle, .VERTEX, num_uniform_buffers = 2, num_samplers = 0)
@@ -59,18 +59,18 @@ setup_pipeline :: proc(shader_type: Shader_Type) -> ^sdl.GPUGraphicsPipeline {
             num_samplers = 0,
         )
 
-        pipeline = create_pipeline(vert_shader, frag_shader, vertex_attributes)
+        pipeline = create_pipeline(vert_shader, frag_shader, vertex_attributes, .FILL)
         break
     case .Wireframe:
-        vert_shader = load_shader(vert_circle, .VERTEX, num_uniform_buffers = 2, num_samplers = 0)
+        vert_shader = load_shader(vert_quad, .VERTEX, num_uniform_buffers = 2, num_samplers = 0)
         frag_shader = load_shader(
-			frag_circle,
+			frag_quad,
 			.FRAGMENT,
 			num_uniform_buffers = 1,
 			num_samplers = 0,
 		)
 
-        pipeline = create_pipeline(vert_shader, frag_shader, vertex_attributes)
+        pipeline = create_pipeline(vert_shader, frag_shader, vertex_attributes, .LINE)
 		break
 	}
 
@@ -80,7 +80,11 @@ setup_pipeline :: proc(shader_type: Shader_Type) -> ^sdl.GPUGraphicsPipeline {
 	return pipeline
 }
 
-create_pipeline :: proc(vert_shader : ^sdl.GPUShader, frag_shader : ^sdl.GPUShader, vertex_attributes : []sdl.GPUVertexAttribute) -> ^sdl.GPUGraphicsPipeline{
+create_pipeline :: proc(
+    vert_shader : ^sdl.GPUShader,
+    frag_shader : ^sdl.GPUShader,
+    vertex_attributes : []sdl.GPUVertexAttribute,
+    fill_mode: sdl.GPUFillMode) -> ^sdl.GPUGraphicsPipeline {
     return sdl.CreateGPUGraphicsPipeline(
         gpu,
         {
@@ -92,6 +96,9 @@ create_pipeline :: proc(vert_shader : ^sdl.GPUShader, frag_shader : ^sdl.GPUShad
                 color_target_descriptions = &(sdl.GPUColorTargetDescription) {
                     format = sdl.GetGPUSwapchainTextureFormat(gpu, window),
                 },
+            },
+            rasterizer_state = {
+                fill_mode = fill_mode
             },
             vertex_input_state = {
                 vertex_buffer_descriptions = raw_data(

@@ -6,13 +6,13 @@ import "core:mem"
 import sdl "vendor:sdl3"
 
 Proj :: struct {
-    proj: matrix[4, 4]f32,
+	proj: matrix[4, 4]f32,
 }
 
-render_pass : ^sdl.GPURenderPass
-current_pipeline : ^sdl.GPUGraphicsPipeline
+render_pass: ^sdl.GPURenderPass
+current_pipeline: ^sdl.GPUGraphicsPipeline
 
-pipelines : [Shader_Type]^sdl.GPUGraphicsPipeline
+pipelines: [Shader_Type]^sdl.GPUGraphicsPipeline
 
 main :: proc() {
 	context.logger = log.create_console_logger()
@@ -28,9 +28,9 @@ main :: proc() {
 	gpu = sdl.CreateGPUDevice({.SPIRV}, true, nil)
 	if !sdl.ClaimWindowForGPUDevice(gpu, window) do log.panicf("Could not claim window for GPU device {}", sdl.GetError())
 
-    for type in Shader_Type {
-        pipelines[type] = setup_pipeline(type)
-    }
+	for type in Shader_Type {
+		pipelines[type] = setup_pipeline(type)
+	}
 
 	world_w, world_h: f32 = f32(width * 10), f32(height * 10)
 
@@ -53,41 +53,43 @@ main :: proc() {
 		),
 	}
 
+    bullet: Entity = {
+        scale = {150, 150, 1},
+        color = {0, 0, 1, 1},
+        material = {pipeline = pipelines[.Circle]},
+        udpate = proc(e: ^Entity, dt: f32) {
+        }
+    }
+
 	tank_1: Entity = {
 		translate = {0, 400, 1},
-		scale     = {150, 800, 1},
-		color     = {1, 0, 0, 1},
-		parent    = &(Entity) {
+		scale = {150, 800, 1},
+		color = {1, 0, 0, 1},
+		material = {pipeline = pipelines[.Solid]},
+		parent = &(Entity) {
 			translate = {0, 0, 1},
 			scale = {500, 1000, 1},
 			color = {0, 1, 0, 1},
 			parent = nil,
+			material = {pipeline = pipelines[.Solid]},
 		},
 	}
-	// 12800 width
-	// 7800 height
 
 	walls: []Entity = {
-		{
-            translate = {-4500, 0, 1},
-            scale = {150, 6000, 1},
-            color = {0, 0, 0, 1}
-        },
-		{
-            translate = {4500, 0, 1},
-            scale = {150, 6000, 1},
-            color = {0, 0, 0, 1}
-        },
-		{
-            translate = {0, 3000, 1},
-            scale = {9150, 150, 1},
-            color = {0, 0, 0, 1}
-        },
+		{translate = {-4500, 0, 1}, scale = {150, 6000, 1}, color = {0, 0, 0, 1}},
+		{translate = {4500, 0, 1}, scale = {150, 6000, 1}, color = {0, 0, 0, 1}},
+		{translate = {0, 3000, 1}, scale = {9150, 150, 1}, color = {0, 0, 0, 1}},
 	}
 
-    foo :: proc() {
-
-    }
+	foo := walls[0]
+	collisions: []Entity = {
+		{
+			translate = {-4500, 0, 1},
+			scale = {300, 6000, 1},
+			color = {1, 0, 0, 1},
+			material = {pipeline = pipelines[.Wireframe]},
+		},
+	}
 
 	entities: [dynamic]Entity
 	bullets: [dynamic]Entity
@@ -126,7 +128,7 @@ main :: proc() {
 	// 		width = u32(converted.w),
 	// 		height = u32(converted.h),
 	// 		usage = {.SAMPLER},
-	// 		format = .R8G8B8A8_UNORM,
+	// 		format = .R8G8B8A8_UNOR
 	// 		layer_count_or_depth = 1,
 	// 		num_levels = 1,
 	// 	},
@@ -189,7 +191,6 @@ main :: proc() {
 	// 	{min_filter = .NEAREST, mag_filter = .NEAREST, mipmap_mode = .NEAREST},
 	// )
 
-
 	last_tick: u64
 	rotating := false
 	speed: f32 = 2000
@@ -208,13 +209,6 @@ main :: proc() {
 			case .KEY_DOWN:
 				if ev.key.scancode == .ESCAPE do break main_loop
 				if ev.key.scancode == .SPACE {
-					bullet: Entity = {
-						scale = {150, 150, 1},
-						color = {0, 0, 1, 1},
-                        material = {
-                            pipeline = pipelines[.Circle]
-                        }
-					}
 					bullet.translate.x += entities[0].parent.translate.x + move_x * 800
 					bullet.translate.y += entities[0].parent.translate.y + move_y * 800
 					bullet.angle = entities[0].parent.angle
@@ -258,7 +252,6 @@ main :: proc() {
 		}
 
 		render_pass := sdl.BeginGPURenderPass(cmd_buf, &color_target, 1, nil)
-		sdl.BindGPUGraphicsPipeline(render_pass, pipelines[.Solid])
 		sdl.BindGPUVertexBuffers(
 			render_pass,
 			0,
@@ -279,6 +272,15 @@ main :: proc() {
 			draw_entity(render_pass, cmd_buf, &bullet)
 		}
 
+		for &collision in collisions {
+			draw_entity(render_pass, cmd_buf, &collision)
+		}
+
+		// do the collisions
+		// take the center 0 0 and add half of the scale + the transform and
+		// we have to go both sites so get to both sites so one time -+scale/2 + transform
+
+
 		// sdl.BindGPUFragmentSamplers(
 		// 	render_pass,
 		// 	0,
@@ -289,5 +291,8 @@ main :: proc() {
 		sdl.EndGPURenderPass(render_pass)
 		if !sdl.SubmitGPUCommandBuffer(cmd_buf) do log.panicf("Could not submit command buffer {}", sdl.GetError())
 	}
-}
 
+	for pipeline in pipelines {
+		sdl.ReleaseGPUGraphicsPipeline(gpu, pipeline)
+	}
+}

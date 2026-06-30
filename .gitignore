@@ -1,4 +1,3 @@
 render_buzz
 /build
-/shaders/spv.frag
-/shaders/spv.vert
+shaders/spv*

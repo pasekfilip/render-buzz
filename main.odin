@@ -2,17 +2,14 @@ package main
 
 import "core:log"
 import "core:math/linalg"
+import "core:math/rand"
 import "core:mem"
+import "renderer"
 import sdl "vendor:sdl3"
 
 Proj :: struct {
 	proj: matrix[4, 4]f32,
 }
-
-render_pass: ^sdl.GPURenderPass
-current_pipeline: ^sdl.GPUGraphicsPipeline
-
-pipelines: [Shader_Type]^sdl.GPUGraphicsPipeline
 
 main :: proc() {
 	context.logger = log.create_console_logger()
@@ -23,276 +20,282 @@ main :: proc() {
 	width: i32 = 1280
 	height: i32 = 780
 
-	window = sdl.CreateWindow("Render buzz", width, height, {})
+    r := renderer.init(width, height)
 
-	gpu = sdl.CreateGPUDevice({.SPIRV}, true, nil)
-	if !sdl.ClaimWindowForGPUDevice(gpu, window) do log.panicf("Could not claim window for GPU device {}", sdl.GetError())
-
-	for type in Shader_Type {
-		pipelines[type] = setup_pipeline(type)
-	}
+    texture := renderer.load_texture(r, "./assets/luffy-elbaph.jpg")
 
 	world_w, world_h: f32 = f32(width * 10), f32(height * 10)
+	left := -world_w / 2
+	right := world_w / 2
+	bottom := -world_h / 2
+	top := world_h / 2
 
-	vertices: []Vertex = {
-		{pos = {-0.5, -0.5}, uv = {0, 1}, color = {255, 0, 0, 255}},
-		{pos = {0.5, -0.5}, uv = {1, 1}, color = {0, 255, 0, 255}},
-		{pos = {0.5, 0.5}, uv = {1, 0}, color = {0, 0, 255, 255}},
-		{pos = {-0.5, 0.5}, uv = {0, 0}, color = {255, 0, 0, 255}},
-	}
 
-	proj: Proj = {
-		proj = linalg.matrix_ortho3d_f32(
-			-world_w / 2,
-			world_w / 2,
-			-world_h / 2,
-			world_h / 2,
-			0,
-			1,
-			false,
-		),
-	}
-
-    bullet: Entity = {
-        scale = {150, 150, 1},
-        color = {0, 0, 1, 1},
-        material = {pipeline = pipelines[.Circle]},
-        udpate = proc(e: ^Entity, dt: f32) {
-        }
-    }
-
-	tank_1: Entity = {
-		translate = {0, 400, 1},
-		scale = {150, 800, 1},
-		color = {1, 0, 0, 1},
-		material = {pipeline = pipelines[.Solid]},
-		parent = &(Entity) {
-			translate = {0, 0, 1},
-			scale = {500, 1000, 1},
-			color = {0, 1, 0, 1},
-			parent = nil,
-			material = {pipeline = pipelines[.Solid]},
-		},
-	}
-
-	walls: []Entity = {
-		{translate = {-4500, 0, 1}, scale = {150, 6000, 1}, color = {0, 0, 0, 1}},
-		{translate = {4500, 0, 1}, scale = {150, 6000, 1}, color = {0, 0, 0, 1}},
-		{translate = {0, 3000, 1}, scale = {9150, 150, 1}, color = {0, 0, 0, 1}},
-	}
-
-	foo := walls[0]
-	collisions: []Entity = {
-		{
-			translate = {-4500, 0, 1},
-			scale = {300, 6000, 1},
-			color = {1, 0, 0, 1},
-			material = {pipeline = pipelines[.Wireframe]},
-		},
-	}
-
-	entities: [dynamic]Entity
-	bullets: [dynamic]Entity
-
-	append(&entities, tank_1)
-	for wall in walls {
-		append(&entities, wall)
-	}
-
-	indices: []u16 = {0, 1, 2, 0, 2, 3}
-
-	// surface := image.Load("./assets/luffy-elbaph.icon")
-	// converted := sdl.ConvertSurface(surface, .RGBA32)
-	// defer sdl.DestroySurface(surface)
-	// defer sdl.DestroySurface(converted)
-
-	vertices_byte_size := len(vertices) * size_of(Vertex)
-	indices_byte_size := len(indices) * size_of(indices[0])
-	// texture_byte_size := converted.pitch * converted.h
-	transfer_buffer_size := u32(vertices_byte_size) + u32(indices_byte_size)
-
-	vertex_buffer := sdl.CreateGPUBuffer(
-		gpu,
-		{props = 0, size = u32(vertices_byte_size), usage = {.VERTEX}},
-	)
-
-	index_buffer := sdl.CreateGPUBuffer(
-		gpu,
-		{props = 0, size = u32(indices_byte_size), usage = {.INDEX}},
-	)
-
-	// texture := sdl.CreateGPUTexture(
-	// 	gpu,
-	// 	{
-	// 		type = .D2,
-	// 		width = u32(converted.w),
-	// 		height = u32(converted.h),
-	// 		usage = {.SAMPLER},
-	// 		format = .R8G8B8A8_UNOR
-	// 		layer_count_or_depth = 1,
-	// 		num_levels = 1,
-	// 	},
-	// )
-
-	transfer_buf := sdl.CreateGPUTransferBuffer(
-		gpu,
-		{usage = .UPLOAD, size = transfer_buffer_size},
-	)
-
-	transfer_mem := sdl.MapGPUTransferBuffer(gpu, transfer_buf, false)
-	mem.copy(transfer_mem, raw_data(vertices), vertices_byte_size)
-	index_dest := mem.ptr_offset((^Vertex)(transfer_mem), len(vertices))
-
-	mem.copy(index_dest, raw_data(indices), indices_byte_size)
-	// texture_dest := mem.ptr_offset((^u8)(transfer_mem), vertices_byte_size + indices_byte_size)
+	// vertices: []Vertex = {
+	// 	{pos = {-0.5, -0.5}, uv = {0, 1}, color = {255, 0, 0, 255}},
+	// 	{pos = {0.5, -0.5}, uv = {1, 1}, color = {0, 255, 0, 255}},
+	// 	{pos = {0.5, 0.5}, uv = {1, 0}, color = {0, 0, 255, 255}},
+	// 	{pos = {-0.5, 0.5}, uv = {0, 0}, color = {255, 0, 0, 255}},
+	// }
 	//
-	// mem.copy(texture_dest, converted.pixels, int(texture_byte_size))
-	sdl.UnmapGPUTransferBuffer(gpu, transfer_buf)
-
-	copy_cmd_buf := sdl.AcquireGPUCommandBuffer(gpu)
-	copy_pass := sdl.BeginGPUCopyPass(copy_cmd_buf)
-
-	sdl.UploadToGPUBuffer(
-		copy_pass,
-		{transfer_buffer = transfer_buf},
-		{buffer = vertex_buffer, size = u32(vertices_byte_size)},
-		false,
-	)
-
-	sdl.UploadToGPUBuffer(
-		copy_pass,
-		{transfer_buffer = transfer_buf, offset = u32(vertices_byte_size)},
-		{buffer = index_buffer, size = u32(indices_byte_size)},
-		false,
-	)
-
-	// sdl.UploadToGPUTexture(
-	// 	copy_pass,
+	// proj: Proj = {
+	// 	proj = linalg.matrix_ortho3d_f32(left, right, bottom, top, 0, 1, false),
+	// }
+	//
+	// // 12800 x 7800
+	//
+	// move_player_1 :: proc(e: ^Entity, dt: f32) {
+	// 	keys := sdl.GetKeyboardState(nil)
+	// 	if keys[sdl.Scancode.W] {
+	// 		e.translate.y += e.velocity.y * dt
+	// 	}
+	// 	if keys[sdl.Scancode.S] {
+	// 		e.translate.y -= e.velocity.y * dt
+	// 	}
+	//
+	// 	e.collision = {
+	// 		min_x = e.translate.x - e.scale.x / 2,
+	// 		max_x = e.translate.x + e.scale.x / 2,
+	// 		min_y = e.translate.y - e.scale.y / 2,
+	// 		max_y = e.translate.y + e.scale.y / 2,
+	// 	}
+	// }
+	//
+	// move_player_2 :: proc(e: ^Entity, dt: f32) {
+	// 	keys := sdl.GetKeyboardState(nil)
+	// 	if keys[sdl.Scancode.UP] {
+	// 		e.translate.y += e.velocity.y * dt
+	// 	}
+	// 	if keys[sdl.Scancode.DOWN] {
+	// 		e.translate.y -= e.velocity.y * dt
+	// 	}
+	//
+	// 	e.collision = {
+	// 		min_x = e.translate.x - e.scale.x / 2,
+	// 		max_x = e.translate.x + e.scale.x / 2,
+	// 		min_y = e.translate.y - e.scale.y / 2,
+	// 		max_y = e.translate.y + e.scale.y / 2,
+	// 	}
+	// }
+	//
+	// move_ball :: proc(e: ^Entity, dt: f32) {
+	// 	e.translate.x += e.velocity.x * dt
+	// 	e.translate.y += e.velocity.y * dt
+	//
+	// 	e.collision = {
+	// 		min_x = e.translate.x - e.scale.x / 2,
+	// 		max_x = e.translate.x + e.scale.x / 2,
+	// 		min_y = e.translate.y - e.scale.y / 2,
+	// 		max_y = e.translate.y + e.scale.y / 2,
+	// 	}
+	// }
+	//
+	// player_1: Entity = {
+	// 	translate = {-6200, 0, 1},
+	// 	scale = {100, 1000, 1},
+	// 	color = {1, 0, 0, 1},
+	// 	material = {pipeline = pipelines[.Solid]},
+	// 	update = move_player_1,
+	// 	velocity = {0, 3000},
+	// }
+	//
+	// player_2: Entity = {
+	// 	translate = {6200, 0, 1},
+	// 	scale = {100, 1000, 1},
+	// 	color = {1, 0, 0, 1},
+	// 	material = {pipeline = pipelines[.Solid]},
+	// 	update = move_player_2,
+	// 	velocity = {0, 3000},
+	// }
+	//
+	// give_ball :: proc() -> ^Entity {
+	// 	ball := new(Entity)
+	// 	ball^ = Entity {
+	// 		translate = {0, 0, 1},
+	// 		scale = {150, 150, 1},
+	// 		color = {0, 0, 1, 1},
+	// 		material = {pipeline = pipelines[.Circle]},
+	// 		update = move_ball,
+	// 		velocity = {-4000 * rand.choice([]f32{-1, 1}), rand.float32_range(-1000, 1000)},
+	// 	}
+	//
+	// 	return ball
+	// }
+	//
+	//
+	// collisions: []Entity = {
 	// 	{
-	// 		transfer_buffer = transfer_buf,
-	// 		offset = u32(vertices_byte_size + indices_byte_size),
-	// 		pixels_per_row = u32(converted.w),
-	// 		rows_per_layer = u32(converted.h),
+	// 		translate = {-4500, 0, 1},
+	// 		scale = {300, 6000, 1},
+	// 		color = {1, 0, 0, 1},
+	// 		material = {pipeline = pipelines[.Wireframe]},
 	// 	},
-	// 	{texture = texture, w = u32(converted.w), h = u32(converted.h), d = 1, mip_level = 0},
+	// }
+	//
+	// indices: []u16 = {0, 1, 2, 0, 2, 3}
+	//
+	// solid_mat_e: []^Entity = {&player_1, &player_2}
+	//
+	// circle_mat_e: [dynamic]^Entity
+	// append(&circle_mat_e, give_ball())
+	//
+	// vertices_byte_size := len(vertices) * size_of(Vertex)
+	// indices_byte_size := len(indices) * size_of(indices[0])
+	// transfer_buffer_size := u32(vertices_byte_size) + u32(indices_byte_size)
+	//
+	// vertex_buffer := sdl.CreateGPUBuffer(
+	// 	renderer.device,
+	// 	{props = 0, size = u32(vertices_byte_size), usage = {.VERTEX}},
+	// )
+	//
+	// index_buffer := sdl.CreateGPUBuffer(
+	// 	renderer.device,
+	// 	{props = 0, size = u32(indices_byte_size), usage = {.INDEX}},
+	// )
+	//
+	// transfer_buf := sdl.CreateGPUTransferBuffer(
+	// 	renderer.device,
+	// 	{usage = .UPLOAD, size = transfer_buffer_size},
+	// )
+	//
+	// transfer_mem := sdl.MapGPUTransferBuffer(renderer.device, transfer_buf, false)
+	// mem.copy(transfer_mem, raw_data(vertices), vertices_byte_size)
+	// index_dest := mem.ptr_offset((^Vertex)(transfer_mem), len(vertices))
+	//
+	// mem.copy(index_dest, raw_data(indices), indices_byte_size)
+	// // texture_dest := mem.ptr_offset((^u8)(transfer_mem), vertices_byte_size + indices_byte_size)
+	// //
+	// sdl.UnmapGPUTransferBuffer(renderer.device, transfer_buf)
+	//
+	// copy_cmd_buf := sdl.AcquireGPUCommandBuffer(renderer.device)
+	// copy_pass := sdl.BeginGPUCopyPass(copy_cmd_buf)
+	//
+	// sdl.UploadToGPUBuffer(
+	// 	copy_pass,
+	// 	{transfer_buffer = transfer_buf},
+	// 	{buffer = vertex_buffer, size = u32(vertices_byte_size)},
 	// 	false,
 	// )
-
-	sdl.EndGPUCopyPass(copy_pass)
-
-	if !sdl.SubmitGPUCommandBuffer(copy_cmd_buf) {
-		log.panicf("Could not submit command buffer {}", sdl.GetError())
-	}
-
-	sdl.ReleaseGPUTransferBuffer(gpu, transfer_buf)
-
-	// sampler := sdl.CreateGPUSampler(
-	// 	gpu,
-	// 	{min_filter = .NEAREST, mag_filter = .NEAREST, mipmap_mode = .NEAREST},
+	//
+	// sdl.UploadToGPUBuffer(
+	// 	copy_pass,
+	// 	{transfer_buffer = transfer_buf, offset = u32(vertices_byte_size)},
+	// 	{buffer = index_buffer, size = u32(indices_byte_size)},
+	// 	false,
 	// )
-
-	last_tick: u64
-	rotating := false
-	speed: f32 = 2000
-	rotate_speed: f32 = 2
-	main_loop: for {
-		delta_af := f32(sdl.GetTicks() - last_tick) / 1000
-		last_tick = sdl.GetTicks()
-
-		move_x := -linalg.sin(entities[0].parent.angle)
-		move_y := linalg.cos(entities[0].parent.angle)
-		ev: sdl.Event
-		for sdl.PollEvent(&ev) {
-			#partial switch ev.type {
-			case .QUIT:
-				break main_loop
-			case .KEY_DOWN:
-				if ev.key.scancode == .ESCAPE do break main_loop
-				if ev.key.scancode == .SPACE {
-					bullet.translate.x += entities[0].parent.translate.x + move_x * 800
-					bullet.translate.y += entities[0].parent.translate.y + move_y * 800
-					bullet.angle = entities[0].parent.angle
-					append(&bullets, bullet)
-				}
-			}
-		}
-
-		keys := sdl.GetKeyboardState(nil)
-		if keys[sdl.Scancode.D] {
-			// rotating = true
-			entities[0].parent.angle -= rotate_speed * delta_af
-		}
-		if keys[sdl.Scancode.A] {
-			// rotating = true
-			entities[0].parent.angle += rotate_speed * delta_af
-		}
-		if keys[sdl.Scancode.W] && !rotating {
-			entities[0].parent.translate.x += (speed * move_x) * delta_af
-			entities[0].parent.translate.y += (speed * move_y) * delta_af
-		}
-		if keys[sdl.Scancode.S] && !rotating {
-			entities[0].parent.translate.x -= (speed * move_x) * delta_af
-			entities[0].parent.translate.y -= (speed * move_y) * delta_af
-		}
-
-		cmd_buf := sdl.AcquireGPUCommandBuffer(gpu)
-		swapchain_tex: ^sdl.GPUTexture
-		if !sdl.WaitAndAcquireGPUSwapchainTexture(cmd_buf, window, &swapchain_tex, nil, nil) {
-			log.panicf("Coudnt aciquire the gpu texture swap chain{}", sdl.GetError())
-		}
-		if swapchain_tex == nil {
-			if !sdl.SubmitGPUCommandBuffer(cmd_buf) do log.panicf("Could not submit command buffer {}", sdl.GetError())
-			continue
-		}
-		color_target := sdl.GPUColorTargetInfo {
-			texture     = swapchain_tex,
-			load_op     = .CLEAR,
-			clear_color = {0, 0.2, 0.4, 1},
-			store_op    = .STORE,
-		}
-
-		render_pass := sdl.BeginGPURenderPass(cmd_buf, &color_target, 1, nil)
-		sdl.BindGPUVertexBuffers(
-			render_pass,
-			0,
-			&(sdl.GPUBufferBinding{buffer = vertex_buffer}),
-			1,
-		)
-		sdl.BindGPUIndexBuffer(render_pass, {buffer = index_buffer}, ._16BIT)
-
-		sdl.PushGPUVertexUniformData(cmd_buf, 0, &proj, size_of(Proj))
-
-		for &entity in entities {
-			draw_entity(render_pass, cmd_buf, &entity)
-		}
-
-		for &bullet in bullets {
-			bullet.translate.x += -linalg.sin(bullet.angle) * speed * delta_af
-			bullet.translate.y += linalg.cos(bullet.angle) * speed * delta_af
-			draw_entity(render_pass, cmd_buf, &bullet)
-		}
-
-		for &collision in collisions {
-			draw_entity(render_pass, cmd_buf, &collision)
-		}
-
-		// do the collisions
-		// take the center 0 0 and add half of the scale + the transform and
-		// we have to go both sites so get to both sites so one time -+scale/2 + transform
-
-
-		// sdl.BindGPUFragmentSamplers(
-		// 	render_pass,
-		// 	0,
-		// 	&(sdl.GPUTextureSamplerBinding{sampler = sampler, texture = texture}),
-		// 	1,
-		// )
-
-		sdl.EndGPURenderPass(render_pass)
-		if !sdl.SubmitGPUCommandBuffer(cmd_buf) do log.panicf("Could not submit command buffer {}", sdl.GetError())
-	}
-
-	for pipeline in pipelines {
-		sdl.ReleaseGPUGraphicsPipeline(gpu, pipeline)
-	}
+	//
+	// sdl.EndGPUCopyPass(copy_pass)
+	//
+	// if !sdl.SubmitGPUCommandBuffer(copy_cmd_buf) {
+	// 	log.panicf("Could not submit command buffer {}", sdl.GetError())
+	// }
+	//
+	// sdl.ReleaseGPUTransferBuffer(renderer.device, transfer_buf)
+	//
+	// // sampler := sdl.CreateGPUSampler(
+	// // 	gpu,
+	// // 	{min_filter = .NEAREST, mag_filter = .NEAREST, mipmap_mode = .NEAREST},
+	// // )
+	//
+	// last_tick: u64
+	// rotating := false
+	// main_loop: for {
+	// 	delta_af := f32(sdl.GetTicks() - last_tick) / 1000
+	// 	last_tick = sdl.GetTicks()
+	//
+	// 	ev: sdl.Event
+	// 	for sdl.PollEvent(&ev) {
+	// 		#partial switch ev.type {
+	// 		case .QUIT:
+	// 			break main_loop
+	// 		case .KEY_DOWN:
+	// 			if ev.key.scancode == .ESCAPE do break main_loop
+	// 			if ev.key.scancode == .R {
+	// 				append(&circle_mat_e, give_ball())
+	// 			}
+	// 		}
+	// 	}
+	//
+	// 	cmd_buf := sdl.AcquireGPUCommandBuffer(renderer.device)
+	// 	swapchain_tex: ^sdl.GPUTexture
+	// 	if !sdl.WaitAndAcquireGPUSwapchainTexture(
+	// 		cmd_buf,
+	// 		renderer.window,
+	// 		&swapchain_tex,
+	// 		nil,
+	// 		nil,
+	// 	) {
+	// 		log.panicf("Coudnt aciquire the gpu texture swap chain{}", sdl.GetError())
+	// 	}
+	// 	if swapchain_tex == nil {
+	// 		if !sdl.SubmitGPUCommandBuffer(cmd_buf) do log.panicf("Could not submit command buffer {}", sdl.GetError())
+	// 		continue
+	// 	}
+	// 	color_target := sdl.GPUColorTargetInfo {
+	// 		texture     = swapchain_tex,
+	// 		load_op     = .CLEAR,
+	// 		clear_color = {0, 0.2, 0.4, 1},
+	// 		store_op    = .STORE,
+	// 	}
+	//
+	// 	render_pass := sdl.BeginGPURenderPass(cmd_buf, &color_target, 1, nil)
+	// 	sdl.BindGPUVertexBuffers(
+	// 		render_pass,
+	// 		0,
+	// 		&(sdl.GPUBufferBinding{buffer = vertex_buffer}),
+	// 		1,
+	// 	)
+	// 	sdl.BindGPUIndexBuffer(render_pass, {buffer = index_buffer}, ._16BIT)
+	//
+	// 	sdl.PushGPUVertexUniformData(cmd_buf, 0, &proj, size_of(Proj))
+	//
+	// 	for entity in solid_mat_e {
+	// 		entity.update(entity, delta_af)
+	// 		draw_entity(render_pass, cmd_buf, entity)
+	// 	}
+	//
+	// 	for entity in circle_mat_e {
+	// 		entity.update(entity, delta_af)
+	// 		draw_entity(render_pass, cmd_buf, entity)
+	// 	}
+	//
+	// 	for &collision in collisions {
+	// 		draw_entity(render_pass, cmd_buf, &collision)
+	// 	}
+	//
+	// 	for paddle in solid_mat_e {
+	// 		for ball in circle_mat_e {
+	// 			paddle_collision :=
+	// 				ball.collision.max_x >= paddle.collision.min_x &&
+	// 				paddle.collision.max_x >= ball.collision.min_x &&
+	// 				ball.collision.max_y >= paddle.collision.min_y &&
+	// 				paddle.collision.max_y >= ball.collision.min_y
+	//
+	// 			wall_collision :=
+	// 				(ball.collision.max_y >= top && ball.velocity.y > 0) ||
+	// 				(bottom >= ball.collision.min_y && ball.velocity.y < 0)
+	//
+	//
+	// 			if (paddle_collision) {
+	// 				as_fuck := ball.translate.y - paddle.translate.y
+	// 				ball.velocity.x *= -1.1
+	// 				ball.velocity.y += as_fuck * 3
+	// 			}
+	//
+	// 			if (wall_collision) {
+	// 				ball.velocity.y *= -1.3
+	// 			}
+	// 		}
+	// 	}
+	//
+	// 	// sdl.BindGPUFragmentSamplers(
+	// 	// 	render_pass,
+	// 	// 	0,
+	// 	// 	&(sdl.GPUTextureSamplerBinding{sampler = sampler, texture = texture}),
+	// 	// 	1,
+	// 	// )
+	//
+	// 	sdl.EndGPURenderPass(render_pass)
+	// 	if !sdl.SubmitGPUCommandBuffer(cmd_buf) do log.panicf("Could not submit command buffer {}", sdl.GetError())
+	// }
 }

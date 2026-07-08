@@ -1,25 +1,36 @@
 package main
-//
-// import "core:math/linalg"
-// import sdl "vendor:sdl3"
-//
-// Collision :: struct {
-//     min_x, max_x, min_y, max_y: f32
-// }
-//
-// Entity :: struct {
-//     name: string,
-// 	translate:  linalg.Vector3f32,
-// 	scale:      linalg.Vector3f32,
-// 	color:      [4]f32,
-// 	rotation:      f32,
-// 	collision: Collision,
-// 	children:   []^Entity,
-// 	material:   Material,
-// 	update:     proc(e: ^Entity, dt: f32),
-//     velocity: [2]f32
-// }
-//
+
+import "core:math/linalg"
+import "renderer"
+import sdl "vendor:sdl3"
+
+Collision :: struct {
+    min_x, max_x, min_y, max_y: f32
+}
+
+Entity :: struct {
+    name: string,
+	translate:  linalg.Vector3f32,
+	scale:      linalg.Vector3f32,
+	color:      [4]f32,
+	rotation:      f32,
+	collision: Collision,
+	children:   []^Entity,
+	material:   renderer.Material,
+    mesh: renderer.Mesh,
+	update:     proc(e: ^Entity, dt: f32),
+    velocity: [2]f32
+}
+
+model_matrix :: proc(e: ^Entity) -> matrix[4,4]f32 {
+    model :=
+        linalg.matrix4_translate_f32(e.translate) *
+        linalg.matrix4_rotate_f32(e.rotation, {0, 0, 1}) *
+        linalg.matrix4_scale_f32(e.scale)
+
+    return model
+}
+
 // draw_entity :: proc(
 // 	render_pass: ^sdl.GPURenderPass,
 // 	cmd_buf: ^sdl.GPUCommandBuffer,

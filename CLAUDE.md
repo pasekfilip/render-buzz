@@ -42,8 +42,9 @@ Your job is to teach, not to build.
 
 ## Knowledge snapshot (update only when Filip asks)
 
-**First game: tanks** — building a tank game as the driver for engine features. Add engine
-capabilities as the game needs them, not speculatively.
+**Driver game: 1v1 medieval fighter** — building a 2D local-multiplayer medieval fighting game as
+the engine driver. Long-term dream is an RTS. Add engine capabilities as the game needs them, not
+speculatively. Previous milestone: pong (completed).
 
 **Comfortable with:**
 - Full render loop: `AcquireGPUCommandBuffer` → `WaitAndAcquireGPUSwapchainTexture` →
@@ -56,28 +57,32 @@ capabilities as the game needs them, not speculatively.
 - Vertex + fragment uniforms: `PushGPUVertexUniformData` (proj matrix at slot 0, model at slot 1),
   `PushGPUFragmentUniformData` (color at slot 0).
 - Orthographic projection via `linalg.matrix_ortho3d_f32`, working in pixel space.
-- `Entity` struct with `translate/scale/angle/color/parent`, parent-child transform composition
-  in `draw_entity`. Keyboard input (WASD move, A/D rotate) with delta time.
-- Event handling (quit / escape).
+- `Entity` struct with `translate/scale/rotation/color/collision/velocity/mesh/material/update`.
+  `model_matrix` proc. Keyboard input with delta time. Event handling (quit / escape).
+- Renderer abstracted into `renderer` package: `Mesh`, `Material`, `create_quad_mesh`,
+  `create_material`, `draw`, `begin_frame`, `end_frame`, pipeline variants (`.Textured`).
+- Textures: `create_material` loads PNG via SDL surface → RGBA32 → GPU texture + sampler.
 
-**Known issue to revisit:** `draw_entity` in `entity.odin:23` — the `loopy` loop never advances
-`root_entity = root_entity.parent`, so it only works correctly for exactly one parent level.
-Deeper hierarchies would infinite-loop.
+**Known issue to revisit:** old `draw_entity` (now commented out in `entity.odin`) — the children
+loop never advanced the root transform correctly. Current code doesn't use parent hierarchies yet.
 
 **The current edge:**
-- Textures & samplers. Commented-out scaffolding exists in `main.odin` (GPU texture creation,
-  transfer buffer upload, sampler). `glsl_texture.frag` is written. Gap: loading image pixels
-  into CPU memory (SDL surface → convert to RGBA32 → copy into transfer buffer).
+- Textures are working (renderer loads PNG, binds sampler). Code is clean and abstracted.
+- Next engine need for the fighter: **sprite animation** (multiple frames in a spritesheet,
+  UV offset/size uniforms) and **multiple distinct entities on screen**.
 
 **Coming from:** an OpenGL/C++ engine (had VertexBuffer, VertexArray, Shader, Texture classes) —
 concepts are familiar, the explicit SDL3 GPU API is the new part.
 
-## Roadmap toward "tank game" (rough order, feature-driven)
+**Art direction:** leaning toward pixel art (practical for solo dev, fits 2D aesthetic).
+
+## Roadmap toward "1v1 medieval fighter" (rough order, feature-driven)
 
 1. ✅ **Vertex buffers** — `CreateGPUBuffer`, transfer buffers, `vertex_input_state`.
 2. ✅ **Index buffers** — `DrawGPUIndexedPrimitives`, share vertices.
-3. **Textures & samplers** — load image → SDL surface → GPU texture, `BindGPUFragmentSamplers`. ← *next*
-4. **Many objects** — draw multiple tanks/entities efficiently; revisit entity architecture.
-5. **Engine architecture** — Renderer / Entity / Sprite as proper Odin structs & procs.
-6. **Systems** — fixed timestep / delta time (already has delta time), collision, game logic.
-7. **Beyond** — audio, asset pipeline, hot-reload, as appetite dictates.
+3. ✅ **Textures & samplers** — SDL surface → GPU texture, `BindGPUFragmentSamplers`, abstracted into `renderer`.
+4. **Sprite animation** — spritesheet UV offsets, animation state machine (idle/run/attack/hurt). ← *next*
+5. **Two players** — second controller/keyboard layout, two character entities.
+6. **Combat** — attack hitboxes separate from body collision, hit detection, health/damage.
+7. **Game state** — round flow (fight → win screen → rematch), simple UI (health bars).
+8. **Beyond** — audio, more moves, art pass, as appetite dictates.

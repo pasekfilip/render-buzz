@@ -1,27 +1,31 @@
 package main
 
+import "core:fmt"
 import "core:log"
 import "core:math/linalg"
 import "renderer"
 import sdl "vendor:sdl3"
+
 
 main :: proc() {
 	context.logger = log.create_console_logger()
 
 	width: i32 = 1280
 	height: i32 = 780
-    r := renderer.init(width, height)
-    defer renderer.destroy(r)
+	r := renderer.init(width, height)
+	defer renderer.destroy(r)
 
-    texture := renderer.load_texture(r, "./assets/random_solider.png")
-
-	move_player_1 :: proc(e: ^Entity, dt: f32) {
+	move_player_1 :: proc(e: ^Entity, input: bit_set[Keys], dt: f32) {
 		keys := sdl.GetKeyboardState(nil)
 		if keys[sdl.Scancode.W] {
 			e.translate.y += e.velocity.y * dt
 		}
 		if keys[sdl.Scancode.S] {
 			e.translate.y -= e.velocity.y * dt
+		}
+		if .J in input {
+			attack_sprite := &e.sprites[.Attack]
+			update_animation_state(e, attack_sprite.anim_conf, .Attack)
 		}
 
 		e.collision = {
@@ -33,25 +37,55 @@ main :: proc() {
 	}
 
 	player_1: Entity = {
-		translate = {-6200, 0, 1},
-		scale = {100, 1000, 1},
-		color = {1, 0, 0, 1},
-		material = {pipeline = r.pipelines[.Solid]},
-		update = move_player_1,
-        mesh = renderer.create_quad_mesh(r),
-		velocity = {0, 3000},
+		translate = {0, 0, 1},
+		scale     = {5000, 5000, 1},
+		color     = {1, 0, 0, 1},
+		update    = move_player_1,
+		mesh      = renderer.create_quad_mesh(r),
+		state     = .Idle,
+		velocity  = {0, 3000},
 	}
 
-	solid_mat_e: []^Entity = {&player_1}
+    material := renderer.create_material(
+        r,
+		"./assets/main-guy.png",
+        r.pipelines[.Textured],
+    )
 
-	// circle_mat_e: [dynamic]^Entity
-	// append(&circle_mat_e, give_ball())
+    player_1.sprites[.Idle] = 
+    {
+        matetrial = material,
+        anim_conf = {
+            frame_count = 4,
+            frame_duration = 0.1,
+            current_frame = 1,
+            frame_width = 100,
+            frame_height = 32,
+        }
+    }
+
+    player_1.sprites[.Attack] = 
+    {
+        matetrial = material,
+        anim_conf = {
+
+            frame_count = 5,
+            frame_duration = 0.1,
+            current_frame = 5,
+            frame_width = 100,
+            frame_height = 32,
+            next_animation = .Idle,
+        }
+    }
+
+	solid_mat_e: []^Entity = {&player_1}
 
 	last_tick: u64
 	main_loop: for {
 		delta_af := f32(sdl.GetTicks() - last_tick) / 1000
 		last_tick = sdl.GetTicks()
 
+		pressed: bit_set[Keys]
 		ev: sdl.Event
 		for sdl.PollEvent(&ev) {
 			#partial switch ev.type {
@@ -59,24 +93,21 @@ main :: proc() {
 				break main_loop
 			case .KEY_DOWN:
 				if ev.key.scancode == .ESCAPE do break main_loop
+				if ev.key.scancode == .J do pressed += {.J}
 			}
 		}
-        renderer.begin_frame(r)
+		if (!renderer.begin_frame(r)) do continue
 
 		for entity in solid_mat_e {
-			entity.update(entity, delta_af)
-            m := model_matrix(entity)
-			renderer.draw(r, &entity.mesh, &entity.material, &m)
+			entity.update(entity, pressed, delta_af)
+			cur_sprite := &entity.sprites[entity.state]
+			sprite_offset, finished := update_animation(&cur_sprite.anim_conf, delta_af)
+			if (finished) do update_animation_state(entity, cur_sprite.anim_conf, cur_sprite.anim_conf.next_animation)
+			m := model_matrix(entity)
+
+			renderer.draw(r, &entity.mesh, &cur_sprite.matetrial, &sprite_offset, &m)
 		}
 
-		// sdl.BindGPUFragmentSamplers(
-		// 	render_pass,
-		// 	0,
-		// 	&(sdl.GPUTextureSamplerBinding{sampler = sampler, texture = texture}),
-		// 	1,
-		// )
-
-        renderer.end_frame(r)
+		renderer.end_frame(r)
 	}
-
 }

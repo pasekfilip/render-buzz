@@ -34,9 +34,10 @@ Renderer :: struct {
 }
 
 Material :: struct {
-	pipeline: ^sdl.GPUGraphicsPipeline,
-	texture:  ^sdl.GPUTexture,
-	sampler:  ^sdl.GPUSampler,
+	pipeline:    ^sdl.GPUGraphicsPipeline,
+	texture:     ^sdl.GPUTexture,
+	sampler:     ^sdl.GPUSampler,
+	solid_color: [4]f32,
 }
 
 Mesh :: struct {
@@ -79,7 +80,7 @@ init :: proc(width: i32, height: i32) -> ^Renderer {
 	return renderer
 }
 
-destroy :: proc(r: ^Renderer) {
+destroy_renderer :: proc(r: ^Renderer) {
 	for pipeline in r.pipelines {
 		sdl.ReleaseGPUGraphicsPipeline(r.device, pipeline)
 	}
@@ -156,7 +157,11 @@ create_mesh :: proc(r: ^Renderer, vertices: []Vertex, indices: []u32) -> Mesh {
 		index_buffer = index_buffer,
 		num_indices = u32(len(indices)),
 	}
+}
 
+destroy_mesh :: proc(r: ^Renderer, mesh: Mesh) {
+	sdl.ReleaseGPUBuffer(r.device, mesh.vertex_buffer)
+	sdl.ReleaseGPUBuffer(r.device, mesh.index_buffer)
 }
 
 begin_frame :: proc(r: ^Renderer) -> bool {
@@ -188,7 +193,7 @@ end_frame :: proc(r: ^Renderer) {
 	if !sdl.SubmitGPUCommandBuffer(r.cmd_buf) do log.panicf("Could not submit command buffer {}", sdl.GetError())
 }
 
-draw :: proc(
+draw_sprite :: proc(
 	r: ^Renderer,
 	mesh: ^Mesh,
 	material: ^Material,
@@ -204,21 +209,40 @@ draw :: proc(
 	)
 	sdl.BindGPUIndexBuffer(r.render_pass, {buffer = mesh.index_buffer}, ._32BIT)
 	sdl.PushGPUVertexUniformData(r.cmd_buf, 1, model_matrix, size_of(matrix[4, 4]f32))
-	sdl.PushGPUVertexUniformData(r.cmd_buf, 2, sprite_offset, size_of(SpriteOffset))
 
-	if (material.texture != nil) {
-		sdl.BindGPUFragmentSamplers(
-			r.render_pass,
-			0,
-			&(sdl.GPUTextureSamplerBinding {
-					sampler = material.sampler,
-					texture = material.texture,
-				}),
-			1,
-		)
-	}
+	sdl.PushGPUVertexUniformData(r.cmd_buf, 2, sprite_offset, size_of(SpriteOffset))
+	sdl.BindGPUFragmentSamplers(
+		r.render_pass,
+		0,
+		&(sdl.GPUTextureSamplerBinding{sampler = material.sampler, texture = material.texture}),
+		1,
+	)
 
 	sdl.DrawGPUIndexedPrimitives(r.render_pass, mesh.num_indices, 1, 0, 0, 0)
+}
+
+draw_solid :: proc(
+	r: ^Renderer,
+	mesh: ^Mesh,
+	material: ^Material,
+	model_matrix: ^matrix[4, 4]f32,
+) {
+	sdl.BindGPUGraphicsPipeline(r.render_pass, material.pipeline)
+	sdl.BindGPUVertexBuffers(
+		r.render_pass,
+		0,
+		&(sdl.GPUBufferBinding{buffer = mesh.vertex_buffer}),
+		1,
+	)
+	sdl.BindGPUIndexBuffer(r.render_pass, {buffer = mesh.index_buffer}, ._32BIT)
+	sdl.PushGPUVertexUniformData(r.cmd_buf, 1, model_matrix, size_of(matrix[4, 4]f32))
+	sdl.PushGPUFragmentUniformData(r.cmd_buf, 0, &material.solid_color, size_of([4]f32))
+
+	sdl.DrawGPUIndexedPrimitives(r.render_pass, mesh.num_indices, 1, 0, 0, 0)
+}
+
+create_solid_material :: proc(r: ^Renderer, solid_color: [4]f32) -> Material {
+	return {pipeline = r.pipelines[.Solid], solid_color = solid_color}
 }
 
 create_material :: proc(
@@ -283,6 +307,11 @@ create_material :: proc(
 	)
 
 	return {pipeline = pipeline, texture = texture, sampler = sampler}
+}
+
+destroy_material :: proc(r: ^Renderer, mat: Material) {
+	sdl.ReleaseGPUSampler(r.device, mat.sampler)
+	sdl.ReleaseGPUTexture(r.device, mat.texture)
 }
 
 setup_pipeline :: proc(renderer: ^Renderer, shader_type: Shader_Type) -> ^sdl.GPUGraphicsPipeline {

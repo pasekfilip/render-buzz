@@ -6,7 +6,7 @@ import "core:math/linalg"
 import "core:mem"
 import sdl "vendor:sdl3"
 
-SpriteOffset :: struct {
+Sprite_Offset :: struct {
 	scale:  [2]f32,
 	offset: [2]f32,
 }
@@ -67,7 +67,7 @@ init :: proc(width: i32, height: i32) -> ^Renderer {
 		renderer.pipelines[type] = setup_pipeline(renderer, type)
 	}
 
-	world_w, world_h: f32 = f32(width * 10), f32(height * 10)
+	world_w, world_h: f32 = f32(width / 4), f32(height / 4)
 	left := -world_w / 2
 	right := world_w / 2
 	bottom := -world_h / 2
@@ -197,7 +197,7 @@ draw_sprite :: proc(
 	r: ^Renderer,
 	mesh: ^Mesh,
 	material: ^Material,
-	sprite_offset: ^SpriteOffset,
+	sprite_offset: ^Sprite_Offset,
 	model_matrix: ^matrix[4, 4]f32,
 ) {
 	sdl.BindGPUGraphicsPipeline(r.render_pass, material.pipeline)
@@ -210,7 +210,7 @@ draw_sprite :: proc(
 	sdl.BindGPUIndexBuffer(r.render_pass, {buffer = mesh.index_buffer}, ._32BIT)
 	sdl.PushGPUVertexUniformData(r.cmd_buf, 1, model_matrix, size_of(matrix[4, 4]f32))
 
-	sdl.PushGPUVertexUniformData(r.cmd_buf, 2, sprite_offset, size_of(SpriteOffset))
+	sdl.PushGPUVertexUniformData(r.cmd_buf, 2, sprite_offset, size_of(Sprite_Offset))
 	sdl.BindGPUFragmentSamplers(
 		r.render_pass,
 		0,

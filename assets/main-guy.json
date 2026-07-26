@@ -1,0 +1,442 @@
+{
+    "frames": [
+        {
+            "filename": "main-guy #Idle 0.aseprite",
+            "frame": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Idle 1.aseprite",
+            "frame": {
+                "x": 100,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Idle 2.aseprite",
+            "frame": {
+                "x": 200,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Idle 3.aseprite",
+            "frame": {
+                "x": 300,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Attack 0.aseprite",
+            "frame": {
+                "x": 0,
+                "y": 32,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Attack 1.aseprite",
+            "frame": {
+                "x": 100,
+                "y": 32,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Attack 2.aseprite",
+            "frame": {
+                "x": 200,
+                "y": 32,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Attack 3.aseprite",
+            "frame": {
+                "x": 300,
+                "y": 32,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Attack 4.aseprite",
+            "frame": {
+                "x": 400,
+                "y": 32,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Run 0.aseprite",
+            "frame": {
+                "x": 0,
+                "y": 64,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Run 1.aseprite",
+            "frame": {
+                "x": 100,
+                "y": 64,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Run 2.aseprite",
+            "frame": {
+                "x": 200,
+                "y": 64,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Run 3.aseprite",
+            "frame": {
+                "x": 300,
+                "y": 64,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Run 4.aseprite",
+            "frame": {
+                "x": 400,
+                "y": 64,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Run 5.aseprite",
+            "frame": {
+                "x": 500,
+                "y": 64,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Run 6.aseprite",
+            "frame": {
+                "x": 600,
+                "y": 64,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Run 7.aseprite",
+            "frame": {
+                "x": 700,
+                "y": 64,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        },
+        {
+            "filename": "main-guy #Run 8.aseprite",
+            "frame": {
+                "x": 800,
+                "y": 64,
+                "w": 100,
+                "h": 32
+            },
+            "rotated": false,
+            "trimmed": false,
+            "spriteSourceSize": {
+                "x": 0,
+                "y": 0,
+                "w": 100,
+                "h": 32
+            },
+            "sourceSize": {
+                "w": 100,
+                "h": 32
+            },
+            "duration": 100
+        }
+    ],
+    "meta": {
+        "app": "http://www.aseprite.org/",
+        "version": "1.3.18.1-x64",
+        "image": "main-guy.png",
+        "format": "RGBA8888",
+        "size": {
+            "w": 900,
+            "h": 96
+        },
+        "scale": "1",
+        "frameTags": [
+            {
+                "name": "Idle",
+                "from": 0,
+                "to": 3,
+                "direction": "forward",
+                "color": "#000000ff"
+            },
+            {
+                "name": "Attack",
+                "from": 4,
+                "to": 8,
+                "direction": "forward",
+                "color": "#000000ff"
+            },
+            {
+                "name": "Run",
+                "from": 9,
+                "to": 17,
+                "direction": "forward",
+                "color": "#000000ff"
+            }
+        ],
+        "layers": [
+            {
+                "name": "player",
+                "opacity": 255,
+                "blendMode": "normal"
+            }
+        ],
+        "slices": []
+    }
+}

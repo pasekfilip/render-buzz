@@ -6,15 +6,15 @@ import "core:math/linalg"
 import "renderer"
 import sdl "vendor:sdl3"
 
-gravity: f32 = 300
+gravity: f32 = 1000
 drag: f32 = 0.8
-speed: f32 = 1000
+speed: f32 = 100
 
 main :: proc() {
 	context.logger = log.create_console_logger()
 
 	width: i32 = 1280
-	height: i32 = 780
+	height: i32 = 720
 	r := renderer.init(width, height)
 	defer renderer.destroy_renderer(r)
 
@@ -23,8 +23,8 @@ main :: proc() {
 	red_mat := renderer.create_solid_material(r, {0.2, 0.5, 0, 1})
 
 	ground: Entity = {
-		translate = {0, -2000, 1},
-		scale     = {4000, 500, 1},
+		translate = {0, -30, 1},
+		scale     = {100, 10, 1},
 		mesh      = quad_mesh,
 		solid_mat = red_mat,
 	}
@@ -35,64 +35,35 @@ main :: proc() {
 		keys := sdl.GetKeyboardState(nil)
 
 		if keys[sdl.Scancode.A] {
-			e.velocity.x -= speed * dt
+			e.velocity.x -= speed
 		}
 
 		if keys[sdl.Scancode.D] {
-			e.velocity.x += speed * dt
+			e.velocity.x += speed
 		}
 
 		if .J in input {
-			attack_sprite := &e.sprites[.Attack]
-			update_animation_state(e, .Attack)
+			// update_animation_state(e, .Attack)
 		}
 		if .SPACE in input && e.on_ground == true {
-			e.velocity.y += 100
+			e.velocity.y += 300
 		}
 
-		e.velocity.x *= drag
+		e.velocity.x *= drag * dt * 100
 	}
+    sprite_sheet, ok:= parse_sprite_sheet(r, "running-bones")
+	defer renderer.destroy_material(r, sprite_sheet.material)
+    if !ok do fmt.println("didnt parse sheet")
 
 	player_1: Entity = {
 		translate = {0, 0, 1},
-		scale     = {1000, 1000, 1},
+		scale     = {20, 20, 1},
 		update    = move_player_1,
 		mesh      = quad_mesh,
 		state     = .Idle,
 		velocity  = {0, 0},
-	}
-
-	material := renderer.create_material(r, "./assets/main-guy.png", r.pipelines[.Textured])
-	defer renderer.destroy_material(r, material)
-
-	player_1.sprites[.Idle] = {
-		matetrial = material,
-		anim_conf = {
-			current_row = 0,
-			row_count = 2,
-			column_count = 5,
-			frame_count = 4,
-			frame_duration = 0.1,
-			current_frame = 0,
-			frame_width = 100,
-			frame_height = 32,
-			next_animation = .Idle,
-		},
-	}
-
-	player_1.sprites[.Attack] = {
-		matetrial = material,
-		anim_conf = {
-			current_row = 1,
-			row_count = 2,
-			frame_count = 5,
-			column_count = 5,
-			frame_duration = 0.1,
-			current_frame = 0,
-			frame_width = 100,
-			frame_height = 32,
-			next_animation = .Idle,
-		},
+        current_frame = 0,
+        sprite_sheet = sprite_sheet
 	}
 
 	sprite_mat_e: []^Entity = {&player_1}
@@ -119,17 +90,15 @@ main :: proc() {
 
 		for entity in sprite_mat_e {
 			entity.update(entity, pressed, delta_af)
-			move_on_velocity(entity)
-			cur_sprite := &entity.sprites[entity.state]
-			scale_vertices_for_texture(entity, cur_sprite.anim_conf)
-			sprite_offset, finished := update_animation(&cur_sprite.anim_conf, delta_af)
-			if (finished) do update_animation_state(entity, cur_sprite.anim_conf.next_animation)
+			move_on_velocity(entity, delta_af)
+			sprite_offset, finished := update_animation(entity, delta_af)
+			// if (finished) do update_animation_state(entity)
 			m := model_matrix(entity)
-
-			renderer.draw_sprite(r, &entity.mesh, &cur_sprite.matetrial, &sprite_offset, &m)
+			renderer.draw_sprite(r, &entity.mesh, &entity.sprite_sheet.material, &sprite_offset, &m)
 		}
 
 		for entity in solid_mat_e {
+            // fmt.println(entity)
 			m := model_matrix(entity)
 			renderer.draw_solid(r, &entity.mesh, &entity.solid_mat, &m)
 		}

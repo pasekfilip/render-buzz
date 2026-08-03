@@ -1,6 +1,5 @@
 package main
 
-import "base:intrinsics"
 import "core:encoding/json"
 import "core:fmt"
 import "core:log"
@@ -9,6 +8,8 @@ import "core:os"
 import "core:reflect"
 import "renderer"
 
+MAX_CLIP_FRAMES :: 16
+
 Keys :: enum {
 	W,
 	A,
@@ -16,6 +17,7 @@ Keys :: enum {
 	D,
 	J,
 	SPACE,
+	X,
 }
 
 Collision :: struct {
@@ -32,33 +34,63 @@ Sprite_Sheet :: struct {
 
 Animation_State :: enum {
 	Idle,
-	Attack,
+	Thrust,
 	Jump,
 	Run,
 }
 
 Animation_Clip :: struct {
-	row:      u16,
-	columns:  u16,
-	duration: u16,
+	durations:   [MAX_CLIP_FRAMES]u16,
+	row:         u16,
+	columns:     u16,
+	hit_frames:  bit_set[0 ..< MAX_CLIP_FRAMES],
+	transitions: []Transition,
+	hitbox:      Hitbox,
+}
+
+Transition :: struct {
+	to:        Animation_State,
+	condition: proc(e: ^Entity) -> bool,
+}
+
+Hitbox :: struct {
+	offset: [3]f32,
+	size:   [3]f32,
+}
+
+Layer :: enum {
+	Ground,
+	Enemy,
+	Player,
 }
 
 Entity :: struct {
-	name:          string,
-	translate:     linalg.Vector3f32,
-	scale:         linalg.Vector3f32,
-	rotation:      f32,
-	collision:     Collision,
-	children:      []^Entity,
-	mesh:          renderer.Mesh,
-	update:        proc(e: ^Entity, input: bit_set[Keys], dt: f32),
-	sprite_sheet:  Sprite_Sheet,
-	solid_mat:     renderer.Material,
-	state:         Animation_State,
-	velocity:      [2]f32,
-	on_ground:     bool,
-	current_frame: u16,
-	anim_elapsed:  f32,
+	name:           string,
+	health:         u16,
+	translate:      [3]f32,
+	scale:          [3]f32,
+	rotation:       f32,
+	collision:      Collision,
+	children:       []^Entity,
+	mesh:           renderer.Mesh,
+	update:         proc(e: ^Entity, input: bit_set[Keys], dt: f32),
+	on_hit:         proc(e: ^Entity, e2: ^Entity),
+	on_collision:   proc(e: ^Entity, e2: ^Entity, difference: [2]f32),
+	sprite_sheet:   Sprite_Sheet,
+	solid_mat:      renderer.Material,
+	state:          Animation_State,
+	velocity:       [2]f32,
+	on_ground:      bool,
+	current_frame:  u16,
+	anim_elapsed:   f32,
+	fliped:         bool,
+	attack_pressed: bool,
+	anim_finished:  bool,
+	category:       Layer,
+	mask:           bit_set[Layer],
+	damage:         u16,
+	is_dead:        bool,
+	has_swing_hit:  bool,
 }
 
 Sprite_Conf :: struct {
@@ -93,7 +125,7 @@ Frame_Tag :: struct {
 }
 
 parse_sprite_sheet :: proc(r: ^renderer.Renderer, sprite_name: string) -> (Sprite_Sheet, bool) {
-	material := renderer.create_material(
+	material := renderer.create_texture_material(
 		r,
 		fmt.tprintf("./assets/%s.png", sprite_name),
 		r.pipelines[.Textured],
@@ -135,11 +167,15 @@ parse_sprite_sheet :: proc(r: ^renderer.Renderer, sprite_name: string) -> (Sprit
 			log.error("frame tag dosent match the animation states")
 			return {}, false
 		}
-		clip: Animation_Clip
+
+		durations: [MAX_CLIP_FRAMES]u16
+		for frame, id in sprite_conf.frames[tag.from:tag.to + 1] {
+			durations[id] = frame.duration
+		}
 		result.clips[anim_state] = {
-			columns  = u16(tag.to - tag.from) + 1,
-			row      = u16(id),
-			duration = 100,
+			durations = durations,
+			columns   = u16(tag.to - tag.from) + 1,
+			row       = u16(id),
 		}
 	}
 
@@ -147,11 +183,11 @@ parse_sprite_sheet :: proc(r: ^renderer.Renderer, sprite_name: string) -> (Sprit
 }
 
 model_matrix :: proc(e: ^Entity) -> matrix[4, 4]f32 {
-    if e.sprite_sheet != {} {
-        aspect_ratio := f32(e.sprite_sheet.frame_width) / f32(e.sprite_sheet.frame_height)
-        e.scale.x = e.scale.y * aspect_ratio
-    }
-    
+	if e.sprite_sheet.column_count > 1 {
+		aspect_ratio := f32(e.sprite_sheet.frame_width) / f32(e.sprite_sheet.frame_height)
+		e.scale.x = e.scale.y * aspect_ratio
+	}
+
 	model :=
 		linalg.matrix4_translate_f32(e.translate) *
 		linalg.matrix4_rotate_f32(e.rotation, {0, 0, 1}) *
@@ -160,63 +196,130 @@ model_matrix :: proc(e: ^Entity) -> matrix[4, 4]f32 {
 	return model
 }
 
-// update_animation_state :: proc(e: ^Entity) {
-// 	e.state = next_state
-// }
+update_animation_state :: proc(e: ^Entity) {
+	transitions := e.sprite_sheet.clips[e.state].transitions
 
-update_animation :: proc(e: ^Entity, dt: f32) -> (renderer.Sprite_Offset, bool) {
+	for transition in transitions {
+		if transition.condition(e) {
+			e.state = transition.to
+			e.anim_elapsed = 0
+			e.current_frame = 0
+			e.has_swing_hit = false
+		}
+	}
+}
+
+update_animation :: proc(e: ^Entity, dt: f32) -> renderer.Sprite_Offset {
 	current_clip := e.sprite_sheet.clips[e.state]
 
-	finished: bool
 	frame_count := current_clip.columns
 	frame_row := current_clip.row
 	sprite_columns := f32(e.sprite_sheet.column_count)
 	sprite_rows := f32(e.sprite_sheet.row_count)
 
 	e.anim_elapsed += dt * 1000
-	elapsed := f32(current_clip.duration) <= e.anim_elapsed
+	elapsed := f32(current_clip.durations[e.current_frame]) <= e.anim_elapsed
 	// if single frame elapsed
 	if elapsed {
+		e.anim_finished = false
 		e.anim_elapsed = 0
 		e.current_frame += 1
 		if e.current_frame >= frame_count {
-			finished = true
+			e.anim_finished = true
 			e.current_frame = 0
 		}
 	}
 
+	scale_x := 1 / sprite_columns
+	offset_x := e.current_frame
+	if e.fliped {
+		scale_x *= -1
+		offset_x += 1
+	}
+
 	return {
-			scale = {1 / sprite_columns, 1 / sprite_rows},
-			offset = {
-				f32(e.current_frame) / f32(sprite_columns),
-				f32(frame_row) / f32(sprite_rows),
-			},
-		},
-		finished
+		scale = {scale_x, 1 / sprite_rows},
+		offset = {f32(offset_x) / f32(sprite_columns), f32(frame_row) / f32(sprite_rows)},
+	}
 }
 
-padding: f32 = 100
-collision_happen :: proc(e1: ^Entity, e2: ^Entity) -> bool {
+collision_happen :: proc(
+	translate_1: [3]f32,
+	scale_1: [3]f32,
+	translate_2: [3]f32,
+	scale_2: [3]f32,
+) -> (
+	bool,
+	[2]f32,
+) {
 	col_e1: Collision = {
-		min_x = e1.translate.x - e1.scale.x / 2,
-		max_x = e1.translate.x + e1.scale.x / 2,
-		min_y = (e1.translate.y - e1.scale.y / 1.9),
-		max_y = e1.translate.y + e1.scale.y / 1.9,
+		min_x = translate_1.x - scale_1.x / 2,
+		max_x = translate_1.x + scale_1.x / 2,
+		min_y = translate_1.y - scale_1.y / 2,
+		max_y = translate_1.y + scale_1.y / 2,
 	}
 
 	col_e2: Collision = {
-		min_x = e2.translate.x - e2.scale.x / 2,
-		max_x = e2.translate.x + e2.scale.x / 2,
-		min_y = e2.translate.y - e2.scale.y / 2,
-		max_y = e2.translate.y + e2.scale.y / 2,
+		min_x = translate_2.x - scale_2.x / 2,
+		max_x = translate_2.x + scale_2.x / 2,
+		min_y = translate_2.y - scale_2.y / 2,
+		max_y = translate_2.y + scale_2.y / 2,
 	}
 
-	collided := col_e1.min_y <= col_e2.max_y
+	collided :=
+		col_e1.min_y <= col_e2.max_y &&
+		col_e1.max_y >= col_e2.min_y &&
+		col_e1.min_x <= col_e2.max_x &&
+		col_e1.max_x >= col_e2.min_x
 
-	return collided
+	// meaning e1 overlfowed on which side
+	overflow_x_right := col_e1.max_x - col_e2.min_x
+	overflow_x_left := col_e2.max_x - col_e1.min_x
+
+	overflow_y_top := col_e1.max_y - col_e2.min_y
+	overflow_y_bottom := col_e2.max_y - col_e1.min_y
+
+	swap_sign := overflow_x_right < overflow_x_left
+	difference: [2]f32
+	if swap_sign {
+		difference = {
+			-min(overflow_x_right, overflow_x_left),
+			min(overflow_y_bottom, overflow_y_top),
+		}
+	} else {
+		difference = {
+			min(overflow_x_right, overflow_x_left),
+			min(overflow_y_bottom, overflow_y_top),
+		}
+	}
+
+	return collided, difference
 }
 
-move_on_velocity :: proc(e: ^Entity, dt: f32) {
+collision_happen_entity :: proc(e1: ^Entity, e2: ^Entity) -> (bool, [2]f32) {
+	return collision_happen(e1.translate, e1.scale, e2.translate, e2.scale)
+}
+
+apply_physics :: proc(e: ^Entity, dt: f32) {
+	if !e.on_ground do e.velocity.y -= gravity * dt
+	if abs(e.velocity.x) > 0 {
+		e.velocity.x *= 0.9
+	}
+	if abs(e.velocity.x) < 10 {
+		e.velocity.x = 0
+	}
+
 	e.translate.x += e.velocity.x * dt
 	e.translate.y += e.velocity.y * dt
+}
+
+delete_all_dead_entites :: proc(sprite_e: ^[dynamic]^Entity, collision_e: ^[dynamic]^Entity) {
+
+	for e, i in sprite_e {
+		if e.is_dead do unordered_remove(sprite_e, i)
+	}
+
+	for e, i in collision_e {
+		if e.is_dead do unordered_remove(collision_e, i)
+	}
 }

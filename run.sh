@@ -1,4 +1,3 @@
-
 for glsl in ./shaders/*; do
 
     spv=${glsl//glsl/spv}

@@ -416,7 +416,7 @@
                 "color": "#000000ff"
             },
             {
-                "name": "Attack",
+                "name": "Thrust",
                 "from": 4,
                 "to": 8,
                 "direction": "forward",

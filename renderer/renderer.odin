@@ -97,6 +97,13 @@ create_quad_mesh :: proc(r: ^Renderer) -> Mesh {
 		{pos = {-0.5, 0.5, 1}, uv = {0, 0}, color = {30, 30, 0, 255}},
 	}
 
+	// vertices: []Vertex = {
+	// 	{pos = {-0.5, -0.5, 1}, uv = {1, 1}, color = {30, 30, 0, 255}},
+	//        {pos = {0.5, -0.5, 1}, uv = {0, 1}, color = {30, 30, 0, 255}},
+	// 	{pos = {0.5, 0.5, 1}, uv = {0, 0}, color = {30, 30, 0, 255}},
+	// 	{pos = {-0.5, 0.5, 1}, uv = {1, 0}, color = {30, 30, 0, 255}},
+	// }
+
 	indices: []u32 = {0, 1, 2, 0, 2, 3}
 	return create_mesh(r, vertices, indices)
 }
@@ -241,11 +248,11 @@ draw_solid :: proc(
 	sdl.DrawGPUIndexedPrimitives(r.render_pass, mesh.num_indices, 1, 0, 0, 0)
 }
 
-create_solid_material :: proc(r: ^Renderer, solid_color: [4]f32) -> Material {
-	return {pipeline = r.pipelines[.Solid], solid_color = solid_color}
+create_material :: proc(r: ^Renderer, solid_color: [4]f32, shader_type: Shader_Type) -> Material {
+	return {pipeline = r.pipelines[shader_type], solid_color = solid_color}
 }
 
-create_material :: proc(
+create_texture_material :: proc(
 	r: ^Renderer,
 	path: string,
 	pipeline: ^sdl.GPUGraphicsPipeline,

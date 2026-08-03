@@ -42,9 +42,12 @@ Your job is to teach, not to build.
 
 ## Knowledge snapshot (update only when Filip asks)
 
-**Driver game: 1v1 medieval fighter** — building a 2D local-multiplayer medieval fighting game as
-the engine driver. Long-term dream is an RTS. Add engine capabilities as the game needs them, not
-speculatively. Previous milestone: pong (completed).
+**Driver game: single-player souls-like** — a small game built around a handful of regular enemies
+leading into one boss fight, parry-focused combat, spectacle-driven boss design. Long-term dream is
+still an RTS. Add engine capabilities as the game needs them, not speculatively. Previously
+prototyped a 1v1 local-multiplayer fighter (two players, body collision, knockback) before settling
+on this direction — that work isn't wasted, the animation-state and hitbox systems built for it
+carry over directly to enemy/boss movesets. Previous milestone: pong (completed).
 
 **Comfortable with:**
 - Full render loop: `AcquireGPUCommandBuffer` → `WaitAndAcquireGPUSwapchainTexture` →
@@ -60,29 +63,75 @@ speculatively. Previous milestone: pong (completed).
 - `Entity` struct with `translate/scale/rotation/color/collision/velocity/mesh/material/update`.
   `model_matrix` proc. Keyboard input with delta time. Event handling (quit / escape).
 - Renderer abstracted into `renderer` package: `Mesh`, `Material`, `create_quad_mesh`,
-  `create_material`, `draw`, `begin_frame`, `end_frame`, pipeline variants (`.Textured`).
-- Textures: `create_material` loads PNG via SDL surface → RGBA32 → GPU texture + sampler.
+  `create_material` / `create_texture_material`, `begin_frame`, `end_frame`, and two draw entry
+  points — `draw_solid` (color uniform) and `draw_sprite` (sampler + UV sub-rect).
+- Pipelines built once at init into `r.pipelines: [Shader_Type]^GPUGraphicsPipeline`
+  (`.Solid`, `.Textured`, `.Circle`, `.Wireframe` — the last is just `.LINE` fill mode, used for
+  debug boxes). Alpha blending enabled on all of them; `NEAREST` sampler filtering for pixel art.
+- Textures: `core:image` PNG load (`.alpha_add_if_missing`) → transfer buffer →
+  `UploadToGPUTexture` in a copy pass → `BindGPUFragmentSamplers`.
+- **Sprite animation** (working): `Sprite_Sheet` holds frame dims, row/column counts and
+  `clips: [Animation_State]Animation_Clip`. `update_animation` accumulates `anim_elapsed` in ms
+  against the clip's per-frame `durations`, advances `current_frame`, wraps and reports `finished`,
+  and returns a `renderer.Sprite_Offset{scale, offset}` — a UV sub-rect pushed as **vertex uniform
+  slot 2** and applied in `glsl_quad.vert`. `update_animation_state` resets frame+timer on state
+  change; `reset_animation` drops back to `.Idle` when a clip finishes.
+- **Aseprite JSON parsing**: `json.unmarshal` into `Sprite_Conf`/`Frame`/`Meta`/`Frame_Tag` with
+  `json:"sourceSize"`-style struct tags; `reflect.enum_from_name` maps Aseprite frame-tag names onto
+  the `Animation_State` enum, so naming a tag "Thrust" in Aseprite wires it up automatically.
+  Row/column counts are derived from `meta.size / frames[0].sourceSize`.
+- Aspect-ratio correction in `model_matrix` — `scale.x` derived from `scale.y` × frame aspect, so
+  non-square sprite frames aren't squashed.
+- Simple platformer physics in `main.odin`: gravity applied to `velocity.y`, jump on SPACE when
+  `on_ground`, `move_on_velocity`, a static `ground` entity, AABB-ish `collision_happen`.
+- Hitbox groundwork: `Animation_Clip` carries `hit_frames: bit_set[0..<MAX_CLIP_FRAMES]` and a
+  `Hitbox{offset, size}`, drawn each frame with the `.Wireframe` material for debugging.
 
-**Known issue to revisit:** old `draw_entity` (now commented out in `entity.odin`) — the children
-loop never advanced the root transform correctly. Current code doesn't use parent hierarchies yet.
+**Known issues to revisit:**
+- `parse_sprite_sheet` uses the *frame-tag index* as the spritesheet `row` — only correct while
+  every animation is one full row, in tag order.
+- `durations` is a fixed `[MAX_CLIP_FRAMES]u16` with no bounds check; a clip longer than 16 frames
+  writes out of range.
+- In `parse_sprite_sheet` the unmarshal error path logs `err` instead of `err2`, and
+  `defer free(&sprite_conf)` takes the address of a stack value rather than freeing the slices/
+  strings `json.unmarshal` allocated.
+- Input is mixed: held keys read via `sdl.GetKeyboardState` inside `update`, one-shot keys via the
+  `bit_set[Keys]` built from `KEY_DOWN` events. Fine for now, worth unifying if replay/rollback-style
+  determinism ever matters (simulation should read input as passed-in data, not poll hardware).
+- `collision_happen` now does a real 2-axis AABB overlap test with signed per-axis penetration
+  (least-overlap-axis resolution) — used for ground push-out and entity-vs-entity separation. Still
+  worth revisiting: the same colliding pair gets resolved twice per frame (once from each side).
+- Old `draw_entity` / children-hierarchy attempt is gone; no parent transforms in the current code.
 
 **The current edge:**
-- Textures are working (renderer loads PNG, binds sampler). Code is clean and abstracted.
-- Next engine need for the fighter: **sprite animation** (multiple frames in a spritesheet,
-  UV offset/size uniforms) and **multiple distinct entities on screen**.
+- Sprite animation, two independently-updating entities on screen, ground + entity-vs-entity AABB
+  collision (signed per-axis push-out), and velocity-based movement (accel + cap + drag-to-zero)
+  are all working. None of this is fighter-specific — it's exactly what enemy entities will reuse.
+- Next engine needs for the new direction: **real hit detection** (attacker's `Hitbox` vs. a
+  target's body, gated to `state == .Thrust && current_frame in hit_frames`, with an "already hit
+  this swing" guard so a multi-frame active window doesn't multi-hit), then HP/damage, then a small
+  **data-driven animation-transition table** (`Animation_Clip` gets a `transitions: []Transition{to,
+  condition}` list; one generic step evaluated after `update()` replaces the scattered
+  `update_animation_state(...)` calls currently duplicated per entity).
 
 **Coming from:** an OpenGL/C++ engine (had VertexBuffer, VertexArray, Shader, Texture classes) —
 concepts are familiar, the explicit SDL3 GPU API is the new part.
 
 **Art direction:** leaning toward pixel art (practical for solo dev, fits 2D aesthetic).
 
-## Roadmap toward "1v1 medieval fighter" (rough order, feature-driven)
+## Roadmap toward "single-player souls-like" (rough order, feature-driven)
 
 1. ✅ **Vertex buffers** — `CreateGPUBuffer`, transfer buffers, `vertex_input_state`.
 2. ✅ **Index buffers** — `DrawGPUIndexedPrimitives`, share vertices.
 3. ✅ **Textures & samplers** — SDL surface → GPU texture, `BindGPUFragmentSamplers`, abstracted into `renderer`.
-4. **Sprite animation** — spritesheet UV offsets, animation state machine (idle/run/attack/hurt). ← *next*
-5. **Two players** — second controller/keyboard layout, two character entities.
-6. **Combat** — attack hitboxes separate from body collision, hit detection, health/damage.
-7. **Game state** — round flow (fight → win screen → rematch), simple UI (health bars).
-8. **Beyond** — audio, more moves, art pass, as appetite dictates.
+4. ✅ **Sprite animation** — spritesheet UV offsets, animation state machine (idle/run/attack/hurt).
+5. ✅ **Multi-entity movement & collision** — independently-updating entities, AABB body collision,
+   velocity-based movement. Built via a two-player fighter prototype, but the capability (many
+   entities, each with their own update/animation/collision) is exactly what enemies need too.
+6. **Combat** — `hit_frames`/`Hitbox`-driven hit detection, single-register-per-swing, HP/damage. ← *next*
+7. **Animation transition table** — data-driven `{to, condition}` transitions per clip, replacing
+   hand-called `update_animation_state`; the same table will drive enemy/boss movesets later.
+8. **Enemy AI** — a handful of simple enemies reusing the player's animation/hitbox systems.
+9. **Boss** — bigger scale, richer moveset, parry mechanic (tight timing window on `hit_frames`).
+10. **Game state** — enemies-to-boss progression, simple UI (health bar).
+11. **Beyond** — audio, art pass, more content, as appetite dictates.

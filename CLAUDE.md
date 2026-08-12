@@ -60,11 +60,25 @@ carry over directly to enemy/boss movesets. Previous milestone: pong (completed)
 - Vertex + fragment uniforms: `PushGPUVertexUniformData` (proj matrix at slot 0, model at slot 1),
   `PushGPUFragmentUniformData` (color at slot 0).
 - Orthographic projection via `linalg.matrix_ortho3d_f32`, working in pixel space.
-- `Entity` struct with `translate/scale/rotation/color/collision/velocity/mesh/material/update`.
-  `model_matrix` proc. Keyboard input with delta time. Event handling (quit / escape).
-- Renderer abstracted into `renderer` package: `Mesh`, `Material`, `create_quad_mesh`,
-  `create_material` / `create_texture_material`, `begin_frame`, `end_frame`, and two draw entry
-  points — `draw_solid` (color uniform) and `draw_sprite` (sampler + UV sub-rect).
+- `Entity` struct with `translate/scale/rotation/collision/velocity/mesh/update` plus callbacks
+  (`on_hit`, `on_collision`). `model_matrix` proc. Keyboard input with delta time. Event handling.
+- **Tagged union for appearance**: `Visual :: union {Animated_Sprite, renderer.Texture, renderer.Color}`,
+  held **by value** as `Entity.visual`. Replaced the old parallel `animated_sprite` / `solid_mat` fields
+  and the two separate entity lists — there is now one `all_e: [dynamic]^Entity`, and the draw pass
+  does `switch &v in e.visual` (by *reference*, so the playhead mutation lands on the entity).
+  Key split learned here: `Sprite_Sheet` (clips, frame dims, texture material) is **shared** across
+  entities behind a `^Sprite_Sheet`; `Animated_Sprite` holds only the **per-entity playhead**
+  (`state`, `current_frame`, `anim_elapsed`, `anim_finished`) by value. Flattening the sheet into
+  the variant made player and enemy animate in lockstep — the bug that motivated the split.
+- **Three-pass main loop** (ordering matters): (1) update + physics per entity, (2) pairwise
+  collision, (3) animation state/tick + draw. Animation now runs *after* collision, so transitions
+  reading `on_ground` see the current frame's value instead of last frame's.
+- Renderer lives in the **`engine` package** (`engine/renderer.odin`), imported game-side as
+  `import renderer "engine"`. Exposes `Rect`, `Texture`, `Color`, `Mesh`, `create_quad_mesh`,
+  `load_texture`, `begin_frame`, `end_frame`, and three raylib-shaped draw entry points:
+  `draw_texture(r, ^Texture, source, dest, rotation)`, `draw_rectangle(r, ^Color, dest, rotation)`,
+  `draw_rectangle_lines(...)` (`.Wireframe` fill mode, for debug boxes). Each picks its own
+  pipeline internally — **game code never names a `Shader_Type`**.
 - Pipelines built once at init into `r.pipelines: [Shader_Type]^GPUGraphicsPipeline`
   (`.Solid`, `.Textured`, `.Circle`, `.Wireframe` — the last is just `.LINE` fill mode, used for
   debug boxes). Alpha blending enabled on all of them; `NEAREST` sampler filtering for pixel art.
@@ -73,16 +87,20 @@ carry over directly to enemy/boss movesets. Previous milestone: pong (completed)
 - **Sprite animation** (working): `Sprite_Sheet` holds frame dims, row/column counts and
   `clips: [Animation_State]Animation_Clip`. `update_animation` accumulates `anim_elapsed` in ms
   against the clip's per-frame `durations`, advances `current_frame`, wraps and reports `finished`,
-  and returns a `renderer.Sprite_Offset{scale, offset}` — a UV sub-rect pushed as **vertex uniform
-  slot 2** and applied in `glsl_quad.vert`. `update_animation_state` resets frame+timer on state
-  change; `reset_animation` drops back to `.Idle` when a clip finishes.
+  and returns a **`renderer.Rect` in pixel space** (`x = frame_width * current_frame`,
+  `y = frame_height * clip.row`). `draw_texture` converts that to the `{scale, offset}` UV uniform
+  at **vertex slot 2**, applied in `glsl_quad.vert` (`frag_uv = uv * scale + offset`).
+  `update_animation_state` walks the current clip's `transitions` and resets frame+timer on change.
+- **Horizontal flip** is a **negative `source.w`** (raylib's trick): `update_animation` takes
+  `fliped: bool` and does `if fliped do w *= -1`; `draw_texture` then gets a negative `scale.x`, and
+  `offset.x = (source.x - min(source.w, 0)) / tex_w` picks the right edge instead of the left.
+  Earlier bug, now fixed: negating `source.x` instead of `source.w` — that flips nothing (`scale.x`
+  stays positive), walks UVs off the sheet, and is a silent no-op on frame 0 where `x == 0`.
 - **Aseprite JSON parsing**: `json.unmarshal` into `Sprite_Conf`/`Frame`/`Meta`/`Frame_Tag` with
   `json:"sourceSize"`-style struct tags; `reflect.enum_from_name` maps Aseprite frame-tag names onto
   the `Animation_State` enum, so naming a tag "Thrust" in Aseprite wires it up automatically.
   Row/column counts are derived from `meta.size / frames[0].sourceSize`.
-- Aspect-ratio correction in `model_matrix` — `scale.x` derived from `scale.y` × frame aspect, so
-  non-square sprite frames aren't squashed.
-- Simple platformer physics in `main.odin`: gravity applied to `velocity.y`, jump on SPACE when
+- Simple platformer physics in `physics.odin`: gravity applied to `velocity.y`, jump on SPACE when
   `on_ground`, `move_on_velocity`, a static `ground` entity, AABB-ish `collision_happen`.
 - Hitbox groundwork: `Animation_Clip` carries `hit_frames: bit_set[0..<MAX_CLIP_FRAMES]` and a
   `Hitbox{offset, size}`, drawn each frame with the `.Wireframe` material for debugging.
@@ -102,17 +120,103 @@ carry over directly to enemy/boss movesets. Previous milestone: pong (completed)
   (least-overlap-axis resolution) — used for ground push-out and entity-vs-entity separation. Still
   worth revisiting: the same colliding pair gets resolved twice per frame (once from each side).
 - Old `draw_entity` / children-hierarchy attempt is gone; no parent transforms in the current code.
+- `e.update == nil` currently doubles as "this entity is static" (it skips `apply_physics` too), so
+  a dropped weapon with no update proc would never fall. Fine today; needs a real static flag later.
+- `delete_all_dead_entites` calls `unordered_remove` while iterating, so it skips the element swapped
+  into the hole; a dead entity survives when two die together. Fix: iterate backwards, or use a
+  manual index that only advances when nothing was removed.
+- Entity storage/ownership is unresolved: `all_e` holds `^Entity` pointing at stack locals in `main`.
+  Works now, but dynamic spawning will force the question of who owns entity memory and what happens
+  to held pointers on death. See Fleury's "Entity Memory Contiguity" post.
+- `else do e.on_ground = false` lives inside the pairwise collision loop, so a later non-colliding
+  pair can clobber a `true` set by an earlier one.
+- No `case nil:` on the visual switches — an entity with an unset `visual` silently draws nothing.
+- **Aspect-ratio correction was lost** in the reorg — `sprite_model_matrix` (which derived `scale.x`
+  from `scale.y` × frame aspect) is gone, and `dest.w/h` now comes straight from `e.scale`. Fine for
+  the square 48×48 sheet, wrong the moment a non-square sheet is used (katana 80×64, sword stab 96×48).
+- **The draw pass mutates.** `update_animation_state` + `update_animation` are called inside the
+  draw loop (`main.odin:82-83`), so a skipped frame (`if !begin_frame(r) do continue`) freezes the
+  playhead while physics keeps running, and drawing twice would double the animation speed. The fix
+  is a fourth pass — update+physics → collision → **animate** → draw — with the draw pass reading
+  `current_frame` only. This is also a prerequisite for combat: hit detection wants
+  `current_frame in hit_frames` during the *collision* pass, but the frame isn't advanced until draw.
+- `Visual` has an unused `renderer.Texture` variant with an empty `case` (`main.odin:98`). It can't
+  work as-is anyway — a bare `Texture` has nowhere to put a `source` rect. Delete it; add a proper
+  `Sprite{texture, source}` variant when a static sprite actually exists.
+- Two commented-out hitbox blocks in `main.odin` (lines 41-48, 60-71) reference `e.animated_sprite` /
+  `e.state`, fields that haven't existed for two refactors. Dead noise — git has them.
 
 **The current edge:**
+- **Engine/game split done, now a real package boundary** (2026-08-16). `engine/` is its own Odin
+  package (`engine/renderer.odin`, 498 lines); the game is `package main` across `main.odin` (the
+  loop), `game.odin` (`Entity`, `Keys`/`Animation_State`/`Layer`, `Transition`, tuning globals,
+  `create_world` + `spawn_*`, behavior callbacks), `animation.odin` (`Animated_Sprite`,
+  `Sprite_Sheet`, `Animation_Clip`, the tick + transition procs), `aseprite_animation_parser.odin`
+  (the transient JSON structs + `parse_sprite_sheet`), `collision.odin`, `physics.odin`.
+  Rule learned for file layout: **in Odin a file is not a unit of anything — the package is.** Files
+  in a package share one namespace with no imports or ordering between them, so splitting buys only
+  navigation. Group by *feature*, not by type count (`vendor/sdl3/sdl3_gpu.odin` is 928 lines / 49
+  structs and reads fine). Filip's one-class-per-file instinct comes from OOP and is worth resisting.
+  Decided the **library, not framework** shape: the game owns `Entity` *and* the main loop; the
+  engine owns only parts + procs over parts and never calls back into the game. No base entity,
+  no `using` embedding, no `rawptr` — the extension problem disappears once the engine stops
+  naming `Entity`. Reference points: raylib is a library with no entity concept at all (`BeginDrawing`
+  /`EndDrawing`, `DrawTexturePro`); Unity/Godot are frameworks.
+- **2D sprite layer — DONE** (all four planned steps landed, builds clean). `draw_*` now matches
+  raylib's `DrawTexturePro(texture, source, dest, rotation)` shape:
+  1. ✅ Renderer owns the quad (`r.mesh`); `mesh` param and `Entity.mesh` gone.
+  2. ✅ `Rect{x, y, w, h}`; `dest` + `rotation` params replaced the passed-in model matrix, which is
+     built inside each draw proc. `linalg` is out of game code.
+     **Convention: `dest.x/y` is the CENTER** (the quad mesh is origin-centered and collision is
+     center-based — deliberately *not* raylib's top-left). `source.x/y` is top-left in texture space.
+  3. ✅ Pixel `source: Rect` replaced `Sprite_Offset` as the parameter; `Sprite_Offset` survives only
+     as the private uniform struct inside `draw_texture`. **The shader never changed.**
+  4. ✅ `Material` split into `Texture{texture, sampler, width, height}` + `Color`; `load_texture`
+     replaced `create_texture_material` and lost its pipeline param.
+  Still open (deliberately not done yet): `Camera2D{offset, target, rotation, zoom}` replacing the
+  ortho pushed once at init, and batching/sorting last — that one needs the command list below.
+  **Refactor moratorium (2026-08-16):** Filip flagged that he'd been doing these back-to-back on
+  instruction without owning the reasoning, and felt overwhelmed. The renderer is where it should be.
+  Next tutoring moves should be *game features*, not structure; suggestions must be marked
+  optional-vs-necessary and offered one at a time. Agreed cleanup list is small and all
+  deletions/moves: drop the unused `Texture` variant, delete the dead commented hitbox blocks, move
+  the animation tick into its own pass, run `odinfmt`.
+- **Editor is on the radar** (Filip raised it, not yet started). Conclusions reached: edit/play is a
+  `mode: enum {Edit, Play}` branch in the main loop, *not* a codebase split — Edit skips
+  physics/collision and runs drag logic; both share the draw pass. The real prerequisite is that
+  **the world has to be data before an editor can exist** — `create_world` is currently ~60 lines of
+  Odin, so an editor would have nothing to save. Cheap first step whenever he wants it: `level.json`
+  (reusing the existing `core:encoding/json` machinery) + press `R` to reload live — most of an
+  editor's value for a fraction of the work, and a hard prerequisite anyway. Advice given: it's
+  premature while a level is one ground rect and two guys; build combat and a few enemy kinds first
+  so the editor knows what it's placing.
 - Sprite animation, two independently-updating entities on screen, ground + entity-vs-entity AABB
   collision (signed per-axis push-out), and velocity-based movement (accel + cap + drag-to-zero)
   are all working. None of this is fighter-specific — it's exactly what enemy entities will reuse.
+- Hitbox/hit-detection code is currently **commented out** in `main.odin` — it still reaches for the
+  pre-union `e.animated_sprite` / `e.state` fields and needs rewriting to go through `e.visual`.
 - Next engine needs for the new direction: **real hit detection** (attacker's `Hitbox` vs. a
   target's body, gated to `state == .Thrust && current_frame in hit_frames`, with an "already hit
   this swing" guard so a multi-frame active window doesn't multi-hit), then HP/damage, then a small
   **data-driven animation-transition table** (`Animation_Clip` gets a `transitions: []Transition{to,
   condition}` list; one generic step evaluated after `update()` replaces the scattered
   `update_animation_state(...)` calls currently duplicated per entity).
+  Unblocking move when picking this back up: a `current_clip(e) -> (Animation_Clip, bool)` accessor
+  using the **safe** `v, ok := e.visual.(Animated_Sprite)` form, so non-animated entities return
+  `ok = false` instead of panicking. Three known traps waiting there: (a) `health` is `u16` and
+  `e2.health -= e.damage` underflows — it only *looks* fine because 50 divides into 100, and
+  `if e.health <= 0` on an unsigned type just means `== 0`; (b) the pairwise loop runs `world[i+1:]`
+  so hits are tested **one direction only** — the player's hitbox vs the enemy's body, never the
+  reverse, so enemy attacks will silently do nothing; (c) the debug wireframe material didn't
+  survive the move to `game.odin` and needs recreating, and its draw belongs in the *draw* pass.
+- **Parked deliberately** (discussed, decided *not* to build yet): a CPU-side render command buffer
+  (`Draw_Command` union in the `renderer` package, pushed during sim and drained in one `render()`
+  that absorbs today's `begin_frame`/`end_frame`). The only things it buys are depth/y-sorting,
+  pipeline batching (every `draw_*` currently rebinds the pipeline), and sim/render decoupling —
+  none of which matter at three entities. **The trigger to build it is y-sorting**, when overlapping
+  entities need a draw order that changes per frame. Conversion is mechanical from here, so waiting
+  costs nothing. Note it would also fix `if !begin_frame(r) do continue`, which currently skips the
+  entire simulation (update, physics, collision) whenever the swapchain isn't ready.
 
 **Coming from:** an OpenGL/C++ engine (had VertexBuffer, VertexArray, Shader, Texture classes) —
 concepts are familiar, the explicit SDL3 GPU API is the new part.

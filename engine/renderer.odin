@@ -1,4 +1,4 @@
-package renderer
+package engine
 import "core:image"
 import _ "core:image/png"
 import "core:log"
@@ -6,9 +6,26 @@ import "core:math/linalg"
 import "core:mem"
 import sdl "vendor:sdl3"
 
-Sprite_Offset :: struct {
-	scale:  [2]f32,
-	offset: [2]f32,
+Renderer :: struct {
+	device:      ^sdl.GPUDevice,
+	window:      ^sdl.Window,
+	mesh:        Mesh,
+	render_pass: ^sdl.GPURenderPass,
+	cmd_buf:     ^sdl.GPUCommandBuffer,
+	pipelines:   [Shader_Type]^sdl.GPUGraphicsPipeline,
+	projection:  matrix[4, 4]f32,
+}
+
+Texture :: struct {
+	width, height: u32,
+	texture:       ^sdl.GPUTexture,
+	sampler:       ^sdl.GPUSampler,
+}
+
+Color :: [4]f32
+
+Rect :: struct {
+	x, y, w, h: f32,
 }
 
 Vertex :: struct {
@@ -22,22 +39,6 @@ Shader_Type :: enum {
 	Solid,
 	Circle,
 	Textured,
-}
-
-Renderer :: struct {
-	device:      ^sdl.GPUDevice,
-	window:      ^sdl.Window,
-	render_pass: ^sdl.GPURenderPass,
-	cmd_buf:     ^sdl.GPUCommandBuffer,
-	pipelines:   [Shader_Type]^sdl.GPUGraphicsPipeline,
-	projection:  matrix[4, 4]f32,
-}
-
-Material :: struct {
-	pipeline:    ^sdl.GPUGraphicsPipeline,
-	texture:     ^sdl.GPUTexture,
-	sampler:     ^sdl.GPUSampler,
-	solid_color: [4]f32,
 }
 
 Mesh :: struct {
@@ -54,15 +55,16 @@ frag_circle := #load("../shaders/spv_circle.frag")
 
 frag_texture := #load("../shaders/spv_texture.frag")
 
-init :: proc(width: i32, height: i32) -> ^Renderer {
+init_window :: proc(width: i32, height: i32, title: cstring) -> ^Renderer {
 	if !sdl.Init({.VIDEO}) do log.panicf("Could not load SDL {}", sdl.GetError())
 
 	renderer := new(Renderer)
-	renderer.window = sdl.CreateWindow("Render buzz", width, height, {})
+	renderer.window = sdl.CreateWindow(title, width, height, {})
 
 	renderer.device = sdl.CreateGPUDevice({.SPIRV}, true, nil)
 	if !sdl.ClaimWindowForGPUDevice(renderer.device, renderer.window) do log.panicf("Could not claim window for GPU device {}", sdl.GetError())
 
+	renderer.mesh = create_quad_mesh(renderer)
 	for type in Shader_Type {
 		renderer.pipelines[type] = setup_pipeline(renderer, type)
 	}
@@ -96,13 +98,6 @@ create_quad_mesh :: proc(r: ^Renderer) -> Mesh {
 		{pos = {0.5, 0.5, 1}, uv = {1, 0}, color = {30, 30, 0, 255}},
 		{pos = {-0.5, 0.5, 1}, uv = {0, 0}, color = {30, 30, 0, 255}},
 	}
-
-	// vertices: []Vertex = {
-	// 	{pos = {-0.5, -0.5, 1}, uv = {1, 1}, color = {30, 30, 0, 255}},
-	//        {pos = {0.5, -0.5, 1}, uv = {0, 1}, color = {30, 30, 0, 255}},
-	// 	{pos = {0.5, 0.5, 1}, uv = {0, 0}, color = {30, 30, 0, 255}},
-	// 	{pos = {-0.5, 0.5, 1}, uv = {1, 0}, color = {30, 30, 0, 255}},
-	// }
 
 	indices: []u32 = {0, 1, 2, 0, 2, 3}
 	return create_mesh(r, vertices, indices)
@@ -200,63 +195,79 @@ end_frame :: proc(r: ^Renderer) {
 	if !sdl.SubmitGPUCommandBuffer(r.cmd_buf) do log.panicf("Could not submit command buffer {}", sdl.GetError())
 }
 
-draw_sprite :: proc(
-	r: ^Renderer,
-	mesh: ^Mesh,
-	material: ^Material,
-	sprite_offset: ^Sprite_Offset,
-	model_matrix: ^matrix[4, 4]f32,
-) {
-	sdl.BindGPUGraphicsPipeline(r.render_pass, material.pipeline)
+draw_texture :: proc(r: ^Renderer, tex: ^Texture, source: Rect, destination: Rect, rotation: f32) {
+	sdl.BindGPUGraphicsPipeline(r.render_pass, r.pipelines[.Textured])
 	sdl.BindGPUVertexBuffers(
 		r.render_pass,
 		0,
-		&(sdl.GPUBufferBinding{buffer = mesh.vertex_buffer}),
+		&(sdl.GPUBufferBinding{buffer = r.mesh.vertex_buffer}),
 		1,
 	)
-	sdl.BindGPUIndexBuffer(r.render_pass, {buffer = mesh.index_buffer}, ._32BIT)
-	sdl.PushGPUVertexUniformData(r.cmd_buf, 1, model_matrix, size_of(matrix[4, 4]f32))
+	sdl.BindGPUIndexBuffer(r.render_pass, {buffer = r.mesh.index_buffer}, ._32BIT)
+	model_matrix :=
+		linalg.matrix4_translate_f32({destination.x, destination.y, 0}) *
+		linalg.matrix4_rotate_f32(rotation, {0, 0, 1}) *
+		linalg.matrix4_scale_f32({destination.w, destination.h, 1})
+	sdl.PushGPUVertexUniformData(r.cmd_buf, 1, &model_matrix, size_of(matrix[4, 4]f32))
 
+	Sprite_Offset :: struct {
+		scale:  [2]f32,
+		offset: [2]f32,
+	}
+	sprite_offset := &Sprite_Offset {
+		scale = {source.w / f32(tex.width), source.h / f32(tex.height)},
+		offset = {(source.x - min(source.w, 0)) / f32(tex.width), source.y / f32(tex.height)},
+	}
 	sdl.PushGPUVertexUniformData(r.cmd_buf, 2, sprite_offset, size_of(Sprite_Offset))
 	sdl.BindGPUFragmentSamplers(
 		r.render_pass,
 		0,
-		&(sdl.GPUTextureSamplerBinding{sampler = material.sampler, texture = material.texture}),
+		&(sdl.GPUTextureSamplerBinding{sampler = tex.sampler, texture = tex.texture}),
 		1,
 	)
 
-	sdl.DrawGPUIndexedPrimitives(r.render_pass, mesh.num_indices, 1, 0, 0, 0)
+	sdl.DrawGPUIndexedPrimitives(r.render_pass, r.mesh.num_indices, 1, 0, 0, 0)
 }
 
-draw_solid :: proc(
-	r: ^Renderer,
-	mesh: ^Mesh,
-	material: ^Material,
-	model_matrix: ^matrix[4, 4]f32,
-) {
-	sdl.BindGPUGraphicsPipeline(r.render_pass, material.pipeline)
+draw_rectangle :: proc(r: ^Renderer, color: ^Color, destination: Rect, rotation: f32) {
+	sdl.BindGPUGraphicsPipeline(r.render_pass, r.pipelines[.Solid])
 	sdl.BindGPUVertexBuffers(
 		r.render_pass,
 		0,
-		&(sdl.GPUBufferBinding{buffer = mesh.vertex_buffer}),
+		&(sdl.GPUBufferBinding{buffer = r.mesh.vertex_buffer}),
 		1,
 	)
-	sdl.BindGPUIndexBuffer(r.render_pass, {buffer = mesh.index_buffer}, ._32BIT)
-	sdl.PushGPUVertexUniformData(r.cmd_buf, 1, model_matrix, size_of(matrix[4, 4]f32))
-	sdl.PushGPUFragmentUniformData(r.cmd_buf, 0, &material.solid_color, size_of([4]f32))
+	sdl.BindGPUIndexBuffer(r.render_pass, {buffer = r.mesh.index_buffer}, ._32BIT)
+	model_matrix :=
+		linalg.matrix4_translate_f32({destination.x, destination.y, 0}) *
+		linalg.matrix4_rotate_f32(rotation, {0, 0, 1}) *
+		linalg.matrix4_scale_f32({destination.w, destination.h, 1})
+	sdl.PushGPUVertexUniformData(r.cmd_buf, 1, &model_matrix, size_of(matrix[4, 4]f32))
+	sdl.PushGPUFragmentUniformData(r.cmd_buf, 0, color, size_of([4]f32))
 
-	sdl.DrawGPUIndexedPrimitives(r.render_pass, mesh.num_indices, 1, 0, 0, 0)
+	sdl.DrawGPUIndexedPrimitives(r.render_pass, r.mesh.num_indices, 1, 0, 0, 0)
 }
 
-create_material :: proc(r: ^Renderer, solid_color: [4]f32, shader_type: Shader_Type) -> Material {
-	return {pipeline = r.pipelines[shader_type], solid_color = solid_color}
+draw_rectangle_lines :: proc(r: ^Renderer, color: ^Color, destination: Rect, rotation: f32) {
+	sdl.BindGPUGraphicsPipeline(r.render_pass, r.pipelines[.Wireframe])
+	sdl.BindGPUVertexBuffers(
+		r.render_pass,
+		0,
+		&(sdl.GPUBufferBinding{buffer = r.mesh.vertex_buffer}),
+		1,
+	)
+	sdl.BindGPUIndexBuffer(r.render_pass, {buffer = r.mesh.index_buffer}, ._32BIT)
+	model_matrix :=
+		linalg.matrix4_translate_f32({destination.x, destination.y, 0}) *
+		linalg.matrix4_rotate_f32(rotation, {0, 0, 1}) *
+		linalg.matrix4_scale_f32({destination.w, destination.h, 1})
+	sdl.PushGPUVertexUniformData(r.cmd_buf, 1, &model_matrix, size_of(matrix[4, 4]f32))
+	sdl.PushGPUFragmentUniformData(r.cmd_buf, 0, color, size_of([4]f32))
+
+	sdl.DrawGPUIndexedPrimitives(r.render_pass, r.mesh.num_indices, 1, 0, 0, 0)
 }
 
-create_texture_material :: proc(
-	r: ^Renderer,
-	path: string,
-	pipeline: ^sdl.GPUGraphicsPipeline,
-) -> Material {
+load_texture :: proc(r: ^Renderer, path: string, allocator := context.temp_allocator) -> Texture {
 	img, err := image.load_from_file(path, {.alpha_add_if_missing})
 	if (err != nil) {
 		log.error(err)
@@ -313,12 +324,7 @@ create_texture_material :: proc(
 		{min_filter = .NEAREST, mag_filter = .NEAREST, mipmap_mode = .NEAREST},
 	)
 
-	return {pipeline = pipeline, texture = texture, sampler = sampler}
-}
-
-destroy_material :: proc(r: ^Renderer, mat: Material) {
-	sdl.ReleaseGPUSampler(r.device, mat.sampler)
-	sdl.ReleaseGPUTexture(r.device, mat.texture)
+	return {width = u32(img.width), height = u32(img.height), texture = texture, sampler = sampler}
 }
 
 setup_pipeline :: proc(renderer: ^Renderer, shader_type: Shader_Type) -> ^sdl.GPUGraphicsPipeline {

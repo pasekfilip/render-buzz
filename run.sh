@@ -9,4 +9,4 @@ for glsl in ./shaders/*; do
 
 done
 
-odin run .
+odin run --debug .

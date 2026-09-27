@@ -1,6 +1,6 @@
 package main
 
-import renderer "engine"
+import rb "src"
 
 MAX_CLIP_FRAMES :: 16
 
@@ -15,7 +15,7 @@ Animated_Sprite :: struct {
 Sprite_Sheet :: struct {
 	frame_width, frame_height: u32,
 	clips:                     [Animation_State]Animation_Clip,
-	texture:                   renderer.Texture,
+	texture:                   rb.Texture,
 }
 
 Animation_Clip :: struct {
@@ -57,7 +57,7 @@ update_animation :: proc(v: ^Animated_Sprite, dt: f32) {
 	}
 }
 
-texture_source :: proc(fliped: bool, v: ^Animated_Sprite) -> renderer.Rect {
+texture_source :: proc(fliped: bool, v: ^Animated_Sprite) -> rb.Rect {
 	current_clip := v.sprite_sheet.clips[v.state]
 
 	w := f32(v.sprite_sheet.frame_width)

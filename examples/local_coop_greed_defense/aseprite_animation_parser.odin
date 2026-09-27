@@ -6,7 +6,7 @@ import "core:fmt"
 import "core:log"
 import "core:os"
 import "core:reflect"
-import renderer "engine"
+import engine "src"
 
 Sprite_Conf :: struct {
 	frames: []Frame,
@@ -40,14 +40,13 @@ Frame_Tag :: struct {
 }
 
 parse_sprite_sheet :: proc(
-	r: ^renderer.Renderer,
 	texture_name: string,
 	allocator := context.temp_allocator,
 ) -> (
 	^Sprite_Sheet,
 	bool,
 ) {
-	texture := renderer.load_texture(r, fmt.tprintf("./assets/%s.png", texture_name))
+	texture := engine.load_texture(fmt.tprintf("./assets/%s.png", texture_name))
 	sprite_conf_bytes, err := os.read_entire_file(
 		fmt.tprintf("./assets/%s.json", texture_name),
 		allocator,

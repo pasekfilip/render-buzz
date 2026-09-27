@@ -1,7 +1,6 @@
 package main
 
-import "core:log"
-import renderer "engine"
+import engine "src"
 import sdl "vendor:sdl3"
 
 gravity: f32 = 250
@@ -32,7 +31,7 @@ Entity :: struct {
 
 Visual :: union {
 	Animated_Sprite,
-	renderer.Color,
+	engine.Color,
 }
 
 Keys :: enum {
@@ -68,58 +67,8 @@ Transition :: struct {
 	condition: proc(e: ^Entity) -> bool,
 }
 
-create_world :: proc(r: ^renderer.Renderer) -> [dynamic]^Entity {
-	sprite_sheet, ok := parse_sprite_sheet(r, "main-guy")
-	if !ok do log.error("didnt parse sheet")
-
-	idle := make([]Transition, 2)
-	idle[0] = {
-		to = .Run,
-		condition = proc(e: ^Entity) -> bool {
-			return abs(e.velocity.x) > 0 && e.on_ground
-		},
-	}
-	idle[1] = {
-		to = .Thrust,
-		condition = proc(e: ^Entity) -> bool {
-			return e.attack_pressed
-		},
-	}
-
-	run := make([]Transition, 2)
-	run[0] = {
-		to = .Idle,
-		condition = proc(e: ^Entity) -> bool {
-			return abs(e.velocity.x) < 10
-		},
-	}
-	run[1] = {
-		to = .Thrust,
-		condition = proc(e: ^Entity) -> bool {
-			return e.attack_pressed
-		},
-	}
-
-	attack := make([]Transition, 1)
-	attack[0] = {
-		to = .Idle,
-		condition = proc(e: ^Entity) -> bool {
-			return e.visual.(Animated_Sprite).anim_finished
-		},
-	}
-	sprite_sheet.clips[.Idle].transitions = idle
-	sprite_sheet.clips[.Run].transitions = run
-	sprite_sheet.clips[.Thrust].transitions = attack
-
-	sprite_sheet.clips[.Thrust].hit_frames = {2, 3}
-	sprite_sheet.clips[.Thrust].hitbox = {
-		offset = {10, -2, 0},
-		size   = {10, 10, 1},
-	}
-
+create_world :: proc() -> [dynamic]^Entity {
 	all_e: [dynamic]^Entity
-	append(&all_e, spawn_player(sprite_sheet))
-	append(&all_e, spawn_enemy(sprite_sheet))
 	append(&all_e, spawn_ground())
 	return all_e
 }
@@ -203,7 +152,7 @@ spawn_ground :: proc() -> ^Entity {
 	ground: Entity = {
 		translate = {0, -30, 1},
 		scale = {200, 10, 1},
-		visual = renderer.Color{1, 0, 0, 1},
+		visual = engine.Color{1, 0, 0, 1},
 		category = .Ground,
 		mask = {.Player, .Enemy},
 	}

@@ -2,7 +2,7 @@ package main
 
 import "core:log"
 import "core:mem"
-import renderer "engine"
+import rb ""
 import sdl "vendor:sdl3"
 
 main :: proc() {
@@ -21,12 +21,12 @@ main :: proc() {
 		mem.tracking_allocator_clear(a)
 	}
 
-	width: i32 = 1280
-	height: i32 = 720
-	r := renderer.init_window(width, height, "buzz")
-	defer renderer.destroy_renderer(r)
+	width: i32 = 850
+	height: i32 = 450
+	rb.init_window(width, height, "buzz")
+	defer rb.close_window()
 
-	world := create_world(r)
+	world := create_world()
 
 	last_tick: u64
 	main_loop: for {
@@ -75,29 +75,26 @@ main :: proc() {
 		}
 
 		delete_all_dead_entites(&world)
-		if (!renderer.begin_frame(r)) do continue
+		if (!rb.begin_draw()) do continue
 		//NOTE: draw
 		for e in world {
 			switch &v in e.visual {
 			case Animated_Sprite:
-				renderer.draw_texture(
-					r,
+				rb.draw_texture(
 					&v.sprite_sheet.texture,
 					texture_source(e.fliped, &v),
 					{x = e.translate.x, y = e.translate.y, w = e.scale.x, h = e.scale.y},
 					0,
 				)
-			case renderer.Color:
-				renderer.draw_rectangle(
-					r,
-					&v,
+			case rb.Color:
+				rb.draw_rectangle(
 					{x = e.translate.x, y = e.translate.y, w = e.scale.x, h = e.scale.y},
+					&v,
 					0,
 				)
 			}
 		}
-		renderer.end_frame(r)
-		free_all(context.temp_allocator)
+		rb.end_draw()
 	}
 	reset_tracking_allocator(&tracking_allocator)
 }

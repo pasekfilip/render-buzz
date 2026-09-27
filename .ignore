@@ -1,2 +1,5 @@
-assets/*
-!assets/*.json
+*.png
+*.jpg
+*.aseprite
+*.DS_Store
+*.gif

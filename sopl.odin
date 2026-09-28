@@ -5,6 +5,7 @@ import _ "core:image/png"
 import "core:log"
 import "core:math/linalg"
 import "core:mem"
+import "core:time"
 import sdl "vendor:sdl3"
 
 Renderer :: struct {
@@ -14,8 +15,14 @@ Renderer :: struct {
 	render_pass: ^sdl.GPURenderPass,
 	cmd_buf:     ^sdl.GPUCommandBuffer,
 	pipelines:   [Shader_Type]^sdl.GPUGraphicsPipeline,
+	last_tick:   time.Tick,
 	projection:  matrix[4, 4]f32,
+    previous_press: #sparse[sdl.Scancode]bool,
+    current_press: #sparse[sdl.Scancode]bool,
 }
+
+Physical_KeyCode :: sdl.Scancode
+PresentMode :: sdl.GPUPresentMode
 
 Texture :: struct {
 	width, height: u32,
@@ -58,7 +65,7 @@ frag_texture := #load("shaders/spv_texture.frag")
 
 g: ^Renderer
 
-init_window :: proc(title: cstring, width: u32, height: u32) {
+init_window :: proc(title: cstring, width: u32, height: u32, mode := PresentMode.VSYNC) {
 	ensure(sdl.Init({.VIDEO}), string(sdl.GetError()))
 
 	g = new(Renderer)
@@ -77,7 +84,7 @@ init_window :: proc(title: cstring, width: u32, height: u32) {
 			g.device,
 			g.window,
 			sdl.GPUSwapchainComposition.SDR,
-			sdl.GPUPresentMode.VSYNC,
+            mode
 		),
 		string(sdl.GetError()),
 	)
@@ -87,9 +94,42 @@ close_window :: proc() {
 	for pipeline in g.pipelines {
 		sdl.ReleaseGPUGraphicsPipeline(g.device, pipeline)
 	}
+	destroy_mesh(g.mesh)
 	sdl.DestroyGPUDevice(g.device)
 	sdl.DestroyWindow(g.window)
 	sdl.Quit()
+}
+
+window_should_close :: proc() -> bool {
+    g.previous_press = g.current_press
+	g.last_tick = time.tick_now()
+
+	ev: sdl.Event
+	for sdl.PollEvent(&ev) {
+		#partial switch ev.type {
+		case .QUIT:
+			return true
+		case .KEY_DOWN:
+			if ev.key.scancode == .ESCAPE do return true
+            g.current_press[ev.key.scancode] = true
+		case .KEY_UP:
+            g.current_press[ev.key.scancode] = false
+		}
+	}
+
+	return false
+}
+
+is_key_down :: proc(code: Physical_KeyCode) -> bool {
+    return g.current_press[code]
+}
+
+is_key_pressed :: proc(code: Physical_KeyCode) -> bool {
+    return g.current_press[code] && !g.previous_press[code]
+}
+
+get_delta_time :: proc() -> f32 {
+	return f32(time.tick_since(g.last_tick) / time.Second)
 }
 
 create_quad_mesh :: proc() -> Mesh {
@@ -170,9 +210,12 @@ destroy_mesh :: proc(mesh: Mesh) {
 begin_draw :: proc() -> bool {
 	g.cmd_buf = sdl.AcquireGPUCommandBuffer(g.device)
 	swapchain_tex: ^sdl.GPUTexture
-	ensure(sdl.WaitAndAcquireGPUSwapchainTexture(g.cmd_buf, g.window, &swapchain_tex, nil, nil), string(sdl.GetError()))
-	if swapchain_tex == nil { // the window is minimaized
-		ensure(sdl.SubmitGPUCommandBuffer(g.cmd_buf), string(sdl.GetError())) 
+	ensure(
+		sdl.WaitAndAcquireGPUSwapchainTexture(g.cmd_buf, g.window, &swapchain_tex, nil, nil),
+		string(sdl.GetError()),
+	)
+	if swapchain_tex == nil { 	// the window is minimaized
+		ensure(sdl.SubmitGPUCommandBuffer(g.cmd_buf), string(sdl.GetError()))
 		return false
 	}
 
@@ -194,7 +237,7 @@ end_draw :: proc() {
 	if !sdl.SubmitGPUCommandBuffer(g.cmd_buf) do log.panicf("Could not submit command buffer {}", sdl.GetError())
 }
 
-draw_texture :: proc (tex: ^Texture, source: Rect, destination: Rect, rotation: f32) {
+draw_texture :: proc(tex: ^Texture, source: Rect, destination: Rect, rotation: f32) {
 	sdl.BindGPUGraphicsPipeline(g.render_pass, g.pipelines[.Textured])
 	sdl.BindGPUVertexBuffers(
 		g.render_pass,

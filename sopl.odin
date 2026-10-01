@@ -8,17 +8,19 @@ import "core:mem"
 import "core:time"
 import sdl "vendor:sdl3"
 
-Renderer :: struct {
-	device:      ^sdl.GPUDevice,
-	window:      ^sdl.Window,
-	mesh:        Mesh,
-	render_pass: ^sdl.GPURenderPass,
-	cmd_buf:     ^sdl.GPUCommandBuffer,
-	pipelines:   [Shader_Type]^sdl.GPUGraphicsPipeline,
-	last_tick:   time.Tick,
-	projection:  matrix[4, 4]f32,
-    previous_press: #sparse[sdl.Scancode]bool,
-    current_press: #sparse[sdl.Scancode]bool,
+State :: struct {
+	device:          ^sdl.GPUDevice,
+	window:          ^sdl.Window,
+	mesh:            Mesh,
+	render_pass:     ^sdl.GPURenderPass,
+	cmd_buf:         ^sdl.GPUCommandBuffer,
+	pipelines:       [Shader_Type]^sdl.GPUGraphicsPipeline,
+	last_tick:       time.Tick,
+	projection:      matrix[4, 4]f32,
+	previous_press:  #sparse[sdl.Scancode]bool,
+	current_press:   #sparse[sdl.Scancode]bool,
+	default_texture: ^sdl.GPUTexture,
+	default_sampler: ^sdl.GPUSampler,
 }
 
 Physical_KeyCode :: sdl.Scancode
@@ -27,13 +29,41 @@ PresentMode :: sdl.GPUPresentMode
 Texture :: struct {
 	width, height: u32,
 	texture:       ^sdl.GPUTexture,
-	sampler:       ^sdl.GPUSampler,
 }
 
-Color :: [4]f32
+//odinfmt: disable
+Color :: [4]u8
+LIGHTGRAY  :: Color{ 200, 200, 200, 255 }
+GRAY       :: Color{ 130, 130, 130, 255 }
+DARKGRAY   :: Color{ 80, 80, 80, 255 }
+YELLOW     :: Color{ 253, 249, 0, 255 }
+GOLD       :: Color{ 255, 203, 0, 255 }
+ORANGE     :: Color{ 255, 161, 0, 255 }
+PINK       :: Color{ 255, 109, 194, 255 }
+RED        :: Color{ 230, 41, 55, 255 }
+MAROON     :: Color{ 190, 33, 55, 255 }
+GREEN      :: Color{ 0, 228, 48, 255 }
+LIME       :: Color{ 0, 158, 47, 255 }
+DARKGREEN  :: Color{ 0, 117, 44, 255 }
+SKYBLUE    :: Color{ 102, 191, 255, 255 }
+BLUE       :: Color{ 0, 121, 241, 255 }
+DARKBLUE   :: Color{ 0, 82, 172, 255 }
+PURPLE     :: Color{ 200, 122, 255, 255 }
+VIOLET     :: Color{ 135, 60, 190, 255 }
+DARKPURPLE :: Color{ 112, 31, 126, 255 }
+BEIGE      :: Color{ 211, 176, 131, 255 }
+BROWN      :: Color{ 127, 106, 79, 255 }
+DARKBROWN  :: Color{ 76, 63, 47, 255 }
+
+WHITE      :: Color{ 255, 255, 255, 255 }
+BLACK      :: Color{ 0, 0, 0, 255 }
+BLANK      :: Color{ 0, 0, 0, 0 }
+MAGENTA    :: Color{ 255, 0, 255, 255 }
+RAYWHITE   :: Color{ 245, 245, 245, 255 }
+//odinfmt: enable
 
 Rect :: struct {
-	x, y, w, h: f32,
+	x, y, width, height: f32,
 }
 
 Vertex :: struct {
@@ -44,8 +74,6 @@ Vertex :: struct {
 
 Shader_Type :: enum {
 	Wireframe,
-	Solid,
-	Circle,
 	Textured,
 }
 
@@ -55,39 +83,80 @@ Mesh :: struct {
 	num_indices:   u32,
 }
 
-vert_quad := #load("shaders/spv_quad.vert")
-frag_quad := #load("shaders/spv_quad.frag")
+quad_vert := #load("shaders/spv_quad.vert")
+quad_frag := #load("shaders/spv_quad.frag")
 
-vert_circle := #load("shaders/spv_circle.vert")
-frag_circle := #load("shaders/spv_circle.frag")
-
-frag_texture := #load("shaders/spv_texture.frag")
-
-g: ^Renderer
+g: ^State
 
 init_window :: proc(title: cstring, width: u32, height: u32, mode := PresentMode.VSYNC) {
 	ensure(sdl.Init({.VIDEO}), string(sdl.GetError()))
 
-	g = new(Renderer)
+	g = new(State)
 	g.window = sdl.CreateWindow(title, i32(width), i32(height), {})
 
-	g.device = sdl.CreateGPUDevice({.SPIRV}, true, nil)
+	g.device = sdl.CreateGPUDevice({.SPIRV}, ODIN_DEBUG, nil)
 	ensure(sdl.ClaimWindowForGPUDevice(g.device, g.window), string(sdl.GetError()))
 
+	g.default_texture = create_default_texture()
+	g.default_sampler = sdl.CreateGPUSampler(
+		g.device,
+		{min_filter = .NEAREST, mag_filter = .NEAREST, mipmap_mode = .NEAREST},
+	)
 	g.mesh = create_quad_mesh()
+
 	for type in Shader_Type {
 		g.pipelines[type] = setup_pipeline(type)
 	}
 
+	g.projection = linalg.matrix_ortho3d_f32(0, f32(width), f32(height), 0, 0, 1, false)
+
 	ensure(
-		sdl.SetGPUSwapchainParameters(
-			g.device,
-			g.window,
-			sdl.GPUSwapchainComposition.SDR,
-            mode
-		),
+		sdl.SetGPUSwapchainParameters(g.device, g.window, sdl.GPUSwapchainComposition.SDR, mode),
 		string(sdl.GetError()),
 	)
+}
+
+create_default_texture :: proc() -> ^sdl.GPUTexture {
+	white_pixel := []byte{255, 255, 255, 255}
+	width, height: u32 = 1, 1
+	texture_byte_size := u32(len(white_pixel) * size_of(byte))
+	texture := sdl.CreateGPUTexture(
+		g.device,
+		{
+			type = .D2,
+			width = width,
+			height = height,
+			usage = {.SAMPLER},
+			format = .R8G8B8A8_UNORM,
+			layer_count_or_depth = 1,
+			num_levels = 1,
+		},
+	)
+
+	transfer_buf := sdl.CreateGPUTransferBuffer(
+		g.device,
+		{usage = .UPLOAD, size = texture_byte_size},
+	)
+
+	transfer_mem := sdl.MapGPUTransferBuffer(g.device, transfer_buf, false)
+	mem.copy(transfer_mem, raw_data(white_pixel), int(texture_byte_size))
+	sdl.UnmapGPUTransferBuffer(g.device, transfer_buf)
+
+	copy_cmd_buf := sdl.AcquireGPUCommandBuffer(g.device)
+	copy_pass := sdl.BeginGPUCopyPass(copy_cmd_buf)
+
+	sdl.UploadToGPUTexture(
+		copy_pass,
+		{transfer_buffer = transfer_buf, pixels_per_row = width, rows_per_layer = height},
+		{texture = texture, w = width, h = height, d = 1, mip_level = 0},
+		false,
+	)
+
+	sdl.EndGPUCopyPass(copy_pass)
+	ensure(sdl.SubmitGPUCommandBuffer(copy_cmd_buf), string(sdl.GetError()))
+	sdl.ReleaseGPUTransferBuffer(g.device, transfer_buf)
+
+	return texture
 }
 
 close_window :: proc() {
@@ -101,7 +170,7 @@ close_window :: proc() {
 }
 
 window_should_close :: proc() -> bool {
-    g.previous_press = g.current_press
+	g.previous_press = g.current_press
 	g.last_tick = time.tick_now()
 
 	ev: sdl.Event
@@ -111,9 +180,9 @@ window_should_close :: proc() -> bool {
 			return true
 		case .KEY_DOWN:
 			if ev.key.scancode == .ESCAPE do return true
-            g.current_press[ev.key.scancode] = true
+			g.current_press[ev.key.scancode] = true
 		case .KEY_UP:
-            g.current_press[ev.key.scancode] = false
+			g.current_press[ev.key.scancode] = false
 		}
 	}
 
@@ -121,11 +190,11 @@ window_should_close :: proc() -> bool {
 }
 
 is_key_down :: proc(code: Physical_KeyCode) -> bool {
-    return g.current_press[code]
+	return g.current_press[code]
 }
 
 is_key_pressed :: proc(code: Physical_KeyCode) -> bool {
-    return g.current_press[code] && !g.previous_press[code]
+	return g.current_press[code] && !g.previous_press[code]
 }
 
 get_delta_time :: proc() -> f32 {
@@ -189,9 +258,7 @@ create_mesh :: proc(vertices: []Vertex, indices: []u32) -> Mesh {
 	)
 
 	sdl.EndGPUCopyPass(copy_pass)
-	if !sdl.SubmitGPUCommandBuffer(copy_cmd_buf) {
-		log.panicf("Could not submit command buffer {}", sdl.GetError())
-	}
+	ensure(sdl.SubmitGPUCommandBuffer(copy_cmd_buf), string(sdl.GetError()))
 
 	sdl.ReleaseGPUTransferBuffer(g.device, transfer_buf)
 
@@ -207,7 +274,7 @@ destroy_mesh :: proc(mesh: Mesh) {
 	sdl.ReleaseGPUBuffer(g.device, mesh.index_buffer)
 }
 
-begin_draw :: proc() -> bool {
+begin_draw :: proc(color := WHITE) -> bool {
 	g.cmd_buf = sdl.AcquireGPUCommandBuffer(g.device)
 	swapchain_tex: ^sdl.GPUTexture
 	ensure(
@@ -222,7 +289,7 @@ begin_draw :: proc() -> bool {
 	color_target := sdl.GPUColorTargetInfo {
 		texture     = swapchain_tex,
 		load_op     = .CLEAR,
-		clear_color = {0, 0.2, 0.4, 1},
+		clear_color = (sdl.FColor)(linalg.array_cast(color, f32) / 255),
 		store_op    = .STORE,
 	}
 
@@ -234,7 +301,7 @@ begin_draw :: proc() -> bool {
 
 end_draw :: proc() {
 	sdl.EndGPURenderPass(g.render_pass)
-	if !sdl.SubmitGPUCommandBuffer(g.cmd_buf) do log.panicf("Could not submit command buffer {}", sdl.GetError())
+	ensure(sdl.SubmitGPUCommandBuffer(g.cmd_buf), string(sdl.GetError()))
 }
 
 draw_texture :: proc(tex: ^Texture, source: Rect, destination: Rect, rotation: f32) {
@@ -249,7 +316,7 @@ draw_texture :: proc(tex: ^Texture, source: Rect, destination: Rect, rotation: f
 	model_matrix :=
 		linalg.matrix4_translate_f32({destination.x, destination.y, 0}) *
 		linalg.matrix4_rotate_f32(rotation, {0, 0, 1}) *
-		linalg.matrix4_scale_f32({destination.w, destination.h, 1})
+		linalg.matrix4_scale_f32({destination.width, destination.height, 1})
 	sdl.PushGPUVertexUniformData(g.cmd_buf, 1, &model_matrix, size_of(matrix[4, 4]f32))
 
 	Sprite_Offset :: struct {
@@ -257,22 +324,22 @@ draw_texture :: proc(tex: ^Texture, source: Rect, destination: Rect, rotation: f
 		offset: [2]f32,
 	}
 	sprite_offset := &Sprite_Offset {
-		scale = {source.w / f32(tex.width), source.h / f32(tex.height)},
-		offset = {(source.x - min(source.w, 0)) / f32(tex.width), source.y / f32(tex.height)},
+		scale = {source.width / f32(tex.width), source.height / f32(tex.height)},
+		offset = {(source.x - min(source.width, 0)) / f32(tex.width), source.y / f32(tex.height)},
 	}
 	sdl.PushGPUVertexUniformData(g.cmd_buf, 2, sprite_offset, size_of(Sprite_Offset))
 	sdl.BindGPUFragmentSamplers(
 		g.render_pass,
 		0,
-		&(sdl.GPUTextureSamplerBinding{sampler = tex.sampler, texture = tex.texture}),
+		&(sdl.GPUTextureSamplerBinding{sampler = g.default_sampler, texture = tex.texture}),
 		1,
 	)
 
 	sdl.DrawGPUIndexedPrimitives(g.render_pass, g.mesh.num_indices, 1, 0, 0, 0)
 }
 
-draw_rectangle :: proc(destination: Rect, color: ^Color, rotation: f32) {
-	sdl.BindGPUGraphicsPipeline(g.render_pass, g.pipelines[.Solid])
+draw_rectangle :: proc(destination: Rect, color: Color, rotation: f32 = 0) {
+	sdl.BindGPUGraphicsPipeline(g.render_pass, g.pipelines[.Textured])
 	sdl.BindGPUVertexBuffers(
 		g.render_pass,
 		0,
@@ -283,14 +350,20 @@ draw_rectangle :: proc(destination: Rect, color: ^Color, rotation: f32) {
 	model_matrix :=
 		linalg.matrix4_translate_f32({destination.x, destination.y, 0}) *
 		linalg.matrix4_rotate_f32(rotation, {0, 0, 1}) *
-		linalg.matrix4_scale_f32({destination.w, destination.h, 1})
+		linalg.matrix4_scale_f32({destination.width, destination.height, 1})
 	sdl.PushGPUVertexUniformData(g.cmd_buf, 1, &model_matrix, size_of(matrix[4, 4]f32))
-	sdl.PushGPUFragmentUniformData(g.cmd_buf, 0, color, size_of([4]f32))
+
+	sdl.BindGPUFragmentSamplers(
+		g.render_pass,
+		0,
+		&(sdl.GPUTextureSamplerBinding{sampler = g.default_sampler, texture = g.default_texture}),
+		1,
+	)
 
 	sdl.DrawGPUIndexedPrimitives(g.render_pass, g.mesh.num_indices, 1, 0, 0, 0)
 }
 
-draw_rectangle_lines :: proc(color: ^Color, destination: Rect, rotation: f32) {
+draw_rectangle_lines :: proc(destination: Rect, color: Color, rotation: f32) {
 	sdl.BindGPUGraphicsPipeline(g.render_pass, g.pipelines[.Wireframe])
 	sdl.BindGPUVertexBuffers(
 		g.render_pass,
@@ -302,14 +375,15 @@ draw_rectangle_lines :: proc(color: ^Color, destination: Rect, rotation: f32) {
 	model_matrix :=
 		linalg.matrix4_translate_f32({destination.x, destination.y, 0}) *
 		linalg.matrix4_rotate_f32(rotation, {0, 0, 1}) *
-		linalg.matrix4_scale_f32({destination.w, destination.h, 1})
+		linalg.matrix4_scale_f32({destination.width, destination.height, 1})
 	sdl.PushGPUVertexUniformData(g.cmd_buf, 1, &model_matrix, size_of(matrix[4, 4]f32))
-	sdl.PushGPUFragmentUniformData(g.cmd_buf, 0, color, size_of([4]f32))
+	color := color
+	sdl.PushGPUFragmentUniformData(g.cmd_buf, 0, &color, size_of([4]f32))
 
 	sdl.DrawGPUIndexedPrimitives(g.render_pass, g.mesh.num_indices, 1, 0, 0, 0)
 }
 
-load_texture :: proc(path: string, allocator := context.temp_allocator) -> Texture {
+load_texture :: proc(path: string) -> Texture {
 	img, err := image.load_from_file(path, {.alpha_add_if_missing})
 	if (err != nil) {
 		log.error(err)
@@ -337,7 +411,6 @@ load_texture :: proc(path: string, allocator := context.temp_allocator) -> Textu
 
 	transfer_mem := sdl.MapGPUTransferBuffer(g.device, transfer_buf, false)
 	mem.copy(transfer_mem, raw_data(img.pixels.buf), int(texture_byte_size))
-
 	sdl.UnmapGPUTransferBuffer(g.device, transfer_buf)
 
 	copy_cmd_buf := sdl.AcquireGPUCommandBuffer(g.device)
@@ -355,10 +428,7 @@ load_texture :: proc(path: string, allocator := context.temp_allocator) -> Textu
 	)
 
 	sdl.EndGPUCopyPass(copy_pass)
-	if !sdl.SubmitGPUCommandBuffer(copy_cmd_buf) {
-		log.panicf("Could not submit command buffer {}", sdl.GetError())
-	}
-
+	ensure(sdl.SubmitGPUCommandBuffer(copy_cmd_buf), string(sdl.GetError()))
 	sdl.ReleaseGPUTransferBuffer(g.device, transfer_buf)
 
 	sampler := sdl.CreateGPUSampler(
@@ -366,7 +436,7 @@ load_texture :: proc(path: string, allocator := context.temp_allocator) -> Textu
 		{min_filter = .NEAREST, mag_filter = .NEAREST, mipmap_mode = .NEAREST},
 	)
 
-	return {width = u32(img.width), height = u32(img.height), texture = texture, sampler = sampler}
+	return {width = u32(img.width), height = u32(img.height), texture = texture}
 }
 
 setup_pipeline :: proc(shader_type: Shader_Type) -> ^sdl.GPUGraphicsPipeline {
@@ -386,57 +456,21 @@ setup_pipeline :: proc(shader_type: Shader_Type) -> ^sdl.GPUGraphicsPipeline {
 
 	pipeline: ^sdl.GPUGraphicsPipeline
 
-	switch (shader_type) {
-	case .Solid:
-		vert_shader = load_shader(
-			g.device,
-			vert_quad,
-			.VERTEX,
-			num_uniform_buffers = 3,
-			num_samplers = 0,
-		)
-		frag_shader = load_shader(
-			g.device,
-			frag_quad,
-			.FRAGMENT,
-			num_uniform_buffers = 1,
-			num_samplers = 0,
-		)
-
-		pipeline = create_pipeline(vert_shader, frag_shader, vertex_attributes, .FILL)
-		break
-	case .Circle:
-		vert_shader = load_shader(
-			g.device,
-			vert_circle,
-			.VERTEX,
-			num_uniform_buffers = 2,
-			num_samplers = 0,
-		)
-		frag_shader = load_shader(
-			g.device,
-			frag_circle,
-			.FRAGMENT,
-			num_uniform_buffers = 1,
-			num_samplers = 0,
-		)
-
-		pipeline = create_pipeline(vert_shader, frag_shader, vertex_attributes, .FILL)
-		break
+	switch shader_type {
 	case .Wireframe:
 		vert_shader = load_shader(
 			g.device,
-			vert_quad,
+			quad_vert,
 			.VERTEX,
 			num_uniform_buffers = 3,
 			num_samplers = 0,
 		)
 		frag_shader = load_shader(
 			g.device,
-			frag_quad,
+			quad_frag,
 			.FRAGMENT,
 			num_uniform_buffers = 1,
-			num_samplers = 0,
+			num_samplers = 1,
 		)
 
 		pipeline = create_pipeline(vert_shader, frag_shader, vertex_attributes, .LINE)
@@ -445,14 +479,14 @@ setup_pipeline :: proc(shader_type: Shader_Type) -> ^sdl.GPUGraphicsPipeline {
 	case .Textured:
 		vert_shader = load_shader(
 			g.device,
-			vert_quad,
+			quad_vert,
 			.VERTEX,
 			num_uniform_buffers = 3,
 			num_samplers = 0,
 		)
 		frag_shader = load_shader(
 			g.device,
-			frag_texture,
+			quad_frag,
 			.FRAGMENT,
 			num_uniform_buffers = 1,
 			num_samplers = 1,
@@ -513,10 +547,6 @@ create_pipeline :: proc(
 			},
 		},
 	)
-}
-
-begin_mode_2d :: proc() {
-	// renderer.projection = linalg.matrix_ortho3d_f32(left, right, bottom, top, 0, 1, false)
 }
 
 load_shader :: proc(
